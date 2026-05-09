@@ -18,6 +18,7 @@ function sample(over: {
       host: over.serverHost ?? "127.0.0.1",
       port: over.serverPort ?? 8081,
     },
+    webUi: { password: "", sessionSecret: "" },
     insecure: over.insecure ?? true,
   };
 }

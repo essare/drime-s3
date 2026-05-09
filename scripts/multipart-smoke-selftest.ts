@@ -23,6 +23,7 @@ const ctx = await createAppContext({
       gatewayWorkspaceName: "drime-s3",
     },
     server: { host: "127.0.0.1", port: 0 },
+    webUi: { password: "", sessionSecret: "" },
     insecure: true,
   },
   logger: pino({ level: "silent" }),

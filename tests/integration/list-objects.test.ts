@@ -19,6 +19,7 @@ function testConfig(apiBaseUrl: string): AppConfig {
       gatewayWorkspaceName: "drime-s3",
     },
     server: { host: "127.0.0.1", port: 8081 },
+    webUi: { password: "", sessionSecret: "" },
     insecure: true,
   };
 }
