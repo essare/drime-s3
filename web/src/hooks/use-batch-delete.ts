@@ -25,9 +25,7 @@ export function useBatchDeleteObjects() {
       const okCount = data.deleted.length;
       const errCount = data.errors.length;
       if (errCount === 0) {
-        toast.success(
-          `Deleted ${okCount} object${okCount === 1 ? "" : "s"}`,
-        );
+        toast.success(`Deleted ${okCount} object${okCount === 1 ? "" : "s"}`);
       } else {
         const sample = data.errors
           .slice(0, 3)

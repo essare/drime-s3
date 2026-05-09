@@ -1,4 +1,11 @@
-import { ArrowDown, ArrowUp, Folder, MoreHorizontal } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Download,
+  Folder,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
 import type { Row } from "@/components/objects/row-types";
@@ -33,6 +40,8 @@ export type ObjectTableProps = {
   selected: Set<string>;
   onSelectChange: (next: Set<string>) => void;
   onNavigatePrefix: (newPrefix: string) => void;
+  onDownload: (key: string) => void;
+  onRequestDelete: (key: string) => void;
   onLoadMore?: () => void;
   hasMore: boolean;
   isFetching: boolean;
@@ -66,6 +75,8 @@ export function ObjectTable({
   selected,
   onSelectChange,
   onNavigatePrefix,
+  onDownload,
+  onRequestDelete,
   onLoadMore,
   hasMore,
   isFetching,
@@ -200,24 +211,7 @@ export function ObjectTable({
                 </button>
               </TableHead>
               <TableHead className="w-12 text-right">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-8"
-                      aria-label="Row actions (coming soon)"
-                    >
-                      <MoreHorizontal className="size-4" aria-hidden />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem disabled>
-                      Available in Task 19
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <span className="sr-only">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -283,11 +277,9 @@ export function ObjectTable({
                       <TableCell className="text-muted-foreground">—</TableCell>
                       <TableCell className="text-muted-foreground">—</TableCell>
                       <TableCell
-                        className="text-right text-muted-foreground"
+                        className="text-right"
                         onClick={(e) => e.stopPropagation()}
-                      >
-                        ⋯
-                      </TableCell>
+                      />
                     </TableRow>
                   );
                 }
@@ -314,8 +306,37 @@ export function ObjectTable({
                     <TableCell>
                       {formatRelativeDate(row.lastModified)}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      ⋯
+                    <TableCell
+                      className="text-right"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            aria-label="Actions"
+                          >
+                            <MoreHorizontal className="size-4" aria-hidden />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onDownload(row.key)}>
+                            <Download className="mr-2 size-4" aria-hidden />
+                            Download
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => onRequestDelete(row.key)}
+                          >
+                            <Trash2 className="mr-2 size-4" aria-hidden />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );

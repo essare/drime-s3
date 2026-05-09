@@ -56,9 +56,7 @@ export function BulkDeleteToolbar({
   return (
     <>
       <div className="sticky top-0 z-10 -mx-6 flex items-center gap-2 border-y border-border bg-card px-3 py-2">
-        <span className="text-sm text-muted-foreground">
-          {n} selected
-        </span>
+        <span className="text-sm text-muted-foreground">{n} selected</span>
         <Button
           type="button"
           variant="ghost"

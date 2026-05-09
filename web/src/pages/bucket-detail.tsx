@@ -6,6 +6,15 @@ import { ObjectsBreadcrumbs } from "@/components/objects/breadcrumbs";
 import { BulkDeleteToolbar } from "@/components/objects/bulk-delete-toolbar";
 import { ObjectTable } from "@/components/objects/object-table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,8 +23,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useDeleteObject } from "@/hooks/use-delete-object";
 import { flattenListings, useObjectsQuery } from "@/hooks/use-objects";
 import { AdminApiError } from "@/lib/api";
+import { buildObjectUrl } from "@/lib/object-url";
 
 function BucketNotFound({ bucket }: { bucket: string }) {
   return (
@@ -53,9 +64,24 @@ export default function BucketDetailPage() {
     setSelected(next);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when bucket or prefix changes
   useEffect(() => {
     setSelected(new Set());
   }, [bucket, prefix]);
+
+  const deleteObject = useDeleteObject();
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
+  const handleDownload = useCallback(
+    (key: string) => {
+      window.open(buildObjectUrl(bucket, key), "_blank", "noopener");
+    },
+    [bucket],
+  );
+
+  const handleRequestDelete = useCallback((key: string) => {
+    setPendingDelete(key);
+  }, []);
 
   const setPrefix = (next: string) =>
     setSearchParams(next ? { prefix: next } : {}, { replace: false });
@@ -121,6 +147,8 @@ export default function BucketDetailPage() {
         selected={selected}
         onSelectChange={onSelectChange}
         onNavigatePrefix={setPrefix}
+        onDownload={handleDownload}
+        onRequestDelete={handleRequestDelete}
         onLoadMore={() => void objects.fetchNextPage()}
         hasMore={Boolean(objects.hasNextPage)}
         isFetching={objects.isFetching}
@@ -133,6 +161,49 @@ export default function BucketDetailPage() {
               : "No objects yet"
         }
       />
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete object?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete ? (
+                <>
+                  Delete{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+                    {pendingDelete}
+                  </code>{" "}
+                  from <span className="font-mono">{bucket}</span>? This cannot
+                  be undone.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteObject.isPending}
+              onClick={() => {
+                if (!pendingDelete) return;
+                const key = pendingDelete;
+                deleteObject.mutate(
+                  { bucket, key },
+                  { onSettled: () => setPendingDelete(null) },
+                );
+              }}
+            >
+              {deleteObject.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

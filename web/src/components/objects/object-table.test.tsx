@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ObjectTable } from "./object-table";
+
+const noopDownload = vi.fn();
+const noopDelete = vi.fn();
 
 describe("ObjectTable", () => {
   it("renders column headers", () => {
@@ -11,6 +14,8 @@ describe("ObjectTable", () => {
         selected={new Set()}
         onSelectChange={() => {}}
         onNavigatePrefix={() => {}}
+        onDownload={noopDownload}
+        onRequestDelete={noopDelete}
         hasMore={false}
         isFetching={false}
         isFetchingNextPage={false}
@@ -35,6 +40,8 @@ describe("ObjectTable", () => {
         selected={new Set()}
         onSelectChange={() => {}}
         onNavigatePrefix={() => {}}
+        onDownload={noopDownload}
+        onRequestDelete={noopDelete}
         hasMore={false}
         isFetching
         isFetchingNextPage={false}
