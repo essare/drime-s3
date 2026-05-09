@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import pino from "pino";
+import { createWebUiState, deriveSessionSecret, type WebUiState } from "./admin/state";
 import { FolderPathCache } from "./cache/folder-paths";
 import { ListTtlCache } from "./cache/list-ttl";
 import type { AppConfig } from "./config";
@@ -21,6 +22,7 @@ export type AppContext = {
   folderCache: FolderPathCache;
   listCache: ListTtlCache;
   multipartStore: MultipartSessionStore;
+  webUi: WebUiState;
   logger: Logger;
 };
 
@@ -59,6 +61,20 @@ export async function createAppContext(
     }
   }
 
+  let webUi: WebUiState;
+  if (input.config.webUi.password.length === 0) {
+    webUi = createWebUiState({ password: "", sessionSecret: new Uint8Array(0) });
+  } else {
+    const secret = await deriveSessionSecret(
+      input.config.webUi.password,
+      input.config.webUi.sessionSecret,
+    );
+    webUi = createWebUiState({
+      password: input.config.webUi.password,
+      sessionSecret: secret,
+    });
+  }
+
   return {
     config: input.config,
     drime,
@@ -66,6 +82,7 @@ export async function createAppContext(
     folderCache: new FolderPathCache(),
     listCache: new ListTtlCache(),
     multipartStore: new MultipartSessionStore(),
+    webUi,
     logger,
   };
 }
