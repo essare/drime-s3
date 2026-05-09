@@ -22,6 +22,7 @@ export const StatusSchema = z.object({
     drimeApiBaseUrl: z.string(),
     s3KeysSet: z.boolean(),
     region: z.string(),
+    webUiPasswordSet: z.boolean(),
   }),
   drime: z.object({
     reachable: z.boolean(),
@@ -30,7 +31,7 @@ export const StatusSchema = z.object({
   }),
   workspace: z.object({
     name: z.string(),
-    id: z.number().optional(),
+    id: z.number().nullable(),
     exists: z.boolean(),
   }),
 });

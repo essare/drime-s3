@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type RenderOptions, render } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
+import { vi } from "vitest";
 
 export function createTestQueryClient(): QueryClient {
   return new QueryClient({
@@ -35,4 +36,16 @@ export function renderWithProviders(
       ...options,
     }),
   };
+}
+
+export function mockFetchByUrl(
+  map: Record<string, () => Response | Promise<Response>>,
+): void {
+  globalThis.fetch = vi.fn(async (input) => {
+    const url = typeof input === "string" ? input : (input as Request).url;
+    const path = new URL(url, "http://localhost").pathname;
+    const handler = map[path];
+    if (!handler) throw new Error(`Unmocked URL: ${path}`);
+    return handler();
+  }) as unknown as typeof fetch;
 }

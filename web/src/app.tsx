@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { OnboardingGate } from "./components/gates/onboarding-gate";
 import { PublicSetupGate } from "./components/gates/public-setup-gate";
 import { RequireAuth } from "./components/gates/require-auth";
 import { AppShell } from "./components/layout/app-shell";
@@ -18,20 +19,17 @@ export default function App() {
     >
       <Routes>
         <Route path="/setup" element={<SetupPage />} />
-        <Route
-          path="/login"
-          element={
-            <PublicSetupGate>
-              <LoginPage />
-            </PublicSetupGate>
-          }
-        />
+        <Route element={<PublicSetupGate />}>
+          <Route path="/login" element={<LoginPage />} />
+        </Route>
         <Route element={<RequireAuth />}>
-          <Route element={<AppShell />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/onboarding" element={<OnboardingPage />} />
-            <Route path="/buckets/:bucket" element={<BucketDetailPage />} />
+          <Route element={<OnboardingGate />}>
+            <Route element={<AppShell />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/buckets/:bucket" element={<BucketDetailPage />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<NotFoundPage />} />

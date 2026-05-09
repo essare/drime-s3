@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
-import { Skeleton } from "@/components/ui/skeleton";
+import { FullPageSkeleton } from "@/components/feedback/full-page-skeleton";
 import { useHealthQuery } from "@/hooks/use-health";
 import { useSessionQuery } from "@/hooks/use-session";
 
@@ -22,15 +22,4 @@ export function RequireAuth() {
   }
 
   return <Outlet />;
-}
-
-function FullPageSkeleton() {
-  return (
-    <div className="flex min-h-svh items-center justify-center p-8">
-      <div className="space-y-3">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-4 w-64" />
-      </div>
-    </div>
-  );
 }
