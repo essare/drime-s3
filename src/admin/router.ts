@@ -2,6 +2,7 @@ import type { AppContext } from "../server-context";
 import { checkOrigin, requireSession } from "./auth";
 import { jsonError } from "./errors";
 import { handleHealth } from "./handlers/health";
+import { handleInit } from "./handlers/init";
 import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
 import { handleStatus } from "./handlers/status";
 
@@ -34,6 +35,7 @@ export async function dispatchAdmin(
   if (sessionErr) return sessionErr;
 
   if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
+  if (method === "POST" && path === "/_admin/init") return handleInit(ctx);
 
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);
 }
