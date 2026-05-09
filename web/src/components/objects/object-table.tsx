@@ -47,6 +47,7 @@ export type ObjectTableProps = {
   isFetching: boolean;
   isFetchingNextPage: boolean;
   emptyState?: ReactNode;
+  toolbarRight?: ReactNode;
 };
 
 type SortKey = "name" | "size" | "modified";
@@ -82,6 +83,7 @@ export function ObjectTable({
   isFetching,
   isFetchingNextPage,
   emptyState = "No objects",
+  toolbarRight,
 }: ObjectTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -155,6 +157,9 @@ export function ObjectTable({
   return (
     <TooltipProvider delayDuration={300}>
       <div className="space-y-4">
+        {toolbarRight ? (
+          <div className="flex justify-end">{toolbarRight}</div>
+        ) : null}
         <Table>
           <TableHeader>
             <TableRow>
