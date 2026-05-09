@@ -197,3 +197,32 @@ export async function adminGetObject(
   const msgMatch = /<Message>([^<]*)<\/Message>/.exec(text);
   return jsonError(codeMatch?.[1] ?? "InternalError", msgMatch?.[1] ?? "Download failed.", res.status);
 }
+
+export async function adminDeleteObject(
+  ctx: AppContext,
+  W: number,
+  bucket: string,
+  key: string,
+): Promise<{ kind: "ok" } | { kind: "no-such-bucket" } | { kind: "error"; status: number; code: string; message: string }> {
+  const folder = await findRootFolder(ctx, W, bucket);
+  if (folder === undefined) return { kind: "no-such-bucket" };
+
+  const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
+  const synthReq = new Request(u, { method: "DELETE", headers: new Headers() });
+  const res = await handleObjectRequest(ctx, {
+    method: "DELETE", bucket, key, url: u, req: synthReq, workspaceId: W,
+  });
+  if (res === null) {
+    return { kind: "error", status: 500, code: "InternalError", message: "Object handler returned null." };
+  }
+  if (res.status === 204) return { kind: "ok" };
+  const text = await res.text();
+  const codeMatch = /<Code>([^<]+)<\/Code>/.exec(text);
+  const msgMatch = /<Message>([^<]*)<\/Message>/.exec(text);
+  return {
+    kind: "error",
+    status: res.status,
+    code: codeMatch?.[1] ?? "InternalError",
+    message: msgMatch?.[1] ?? "Delete failed.",
+  };
+}

@@ -7,6 +7,7 @@ import {
   handleListBucketsAdmin,
 } from "./handlers/buckets";
 import {
+  handleDeleteObjectAdmin,
   handleGetObjectAdmin,
   handleListObjectsAdmin,
   handlePutObjectAdmin,
@@ -71,6 +72,12 @@ export async function dispatchAdmin(
     const keyEnc = objectMatch[2] ?? "";
     const key = keyEnc.split("/").map((p) => decodeURIComponent(p)).join("/");
     return handleGetObjectAdmin(ctx, bucket, key, req);
+  }
+  if (objectMatch && method === "DELETE") {
+    const bucket = decodeURIComponent(objectMatch[1] ?? "");
+    const keyEnc = objectMatch[2] ?? "";
+    const key = keyEnc.split("/").map((p) => decodeURIComponent(p)).join("/");
+    return handleDeleteObjectAdmin(ctx, bucket, key);
   }
 
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);

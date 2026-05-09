@@ -1,6 +1,6 @@
 import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import { adminGetObject, adminListObjects, adminPutObject } from "../shared";
+import { adminDeleteObject, adminGetObject, adminListObjects, adminPutObject } from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(
@@ -78,4 +78,20 @@ export async function handleGetObjectAdmin(
     ctx, ctx.gatewayWorkspaceId, bucket, key,
     req.headers.get("range"),
   );
+}
+
+export async function handleDeleteObjectAdmin(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+): Promise<Response> {
+  if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
+  const r = await adminDeleteObject(ctx, ctx.gatewayWorkspaceId, bucket, key);
+  if (r.kind === "no-such-bucket") {
+    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+  }
+  if (r.kind === "error") {
+    return jsonError(r.code, r.message, r.status);
+  }
+  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 }
