@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { dispatchAdmin } from "../admin/router";
+import { dispatchUiAssets } from "../admin/ui-assets";
 import { hasPresignedAuth, verifyPresignedUrl } from "../auth/presigned";
 import { verifySignatureV4 } from "../auth/sigv4";
 import type { AppContext } from "../server-context";
@@ -117,6 +119,18 @@ function corsPreflightResponse(rid: string): Response {
   });
 }
 
+function looksLikeAwsRequest(req: Request, url: URL): boolean {
+  if (req.headers.get("authorization")?.startsWith("AWS4-HMAC-SHA256")) return true;
+  return hasPresignedAuth(url);
+}
+
+function looksLikeBrowserRoot(req: Request, url: URL): boolean {
+  if (url.pathname !== "/") return false;
+  if (looksLikeAwsRequest(req, url)) return false;
+  const accept = req.headers.get("accept") ?? "";
+  return accept.includes("text/html");
+}
+
 /**
  * S3-compatible gateway dispatch (plan Task 11+).
  */
@@ -128,6 +142,21 @@ export async function dispatch(
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
   const pathname = normalizePathname(url);
+
+  if (pathname.startsWith("/_admin/")) {
+    return dispatchAdmin(ctx, req, url);
+  }
+
+  if (pathname === "/_ui" || pathname.startsWith("/_ui/")) {
+    return dispatchUiAssets(ctx, req, url);
+  }
+
+  if (method === "GET" && looksLikeBrowserRoot(req, url)) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "/_ui/", "x-amz-request-id": rid },
+    });
+  }
 
   if (method === "OPTIONS" && isBucketOrObjectPath(pathname)) {
     return corsPreflightResponse(rid);
