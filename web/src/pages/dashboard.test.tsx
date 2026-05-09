@@ -2,7 +2,11 @@ import { screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { createTestQueryClient, mockFetchByUrl, renderWithProviders } from "@/test/utils";
+import {
+  createTestQueryClient,
+  mockFetchByUrl,
+  renderWithProviders,
+} from "@/test/utils";
 import DashboardPage from "./dashboard";
 
 let originalFetch: typeof fetch;

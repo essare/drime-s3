@@ -1,4 +1,7 @@
-export function formatRelativeDate(iso: string, now: Date = new Date()): string {
+export function formatRelativeDate(
+  iso: string,
+  now: Date = new Date(),
+): string {
   const ts = Date.parse(iso);
   if (Number.isNaN(ts)) return iso;
   const diffMs = now.getTime() - ts;

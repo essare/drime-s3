@@ -2,22 +2,15 @@ import { Package, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { CreateBucketDialog } from "@/components/buckets/create-bucket-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBucketsQuery } from "@/hooks/use-buckets";
 import { useStatusQuery } from "@/hooks/use-status";
 import { formatRelativeDate } from "@/lib/format";
-import { StatusSchema } from "@/lib/schemas";
-import type { z } from "zod";
-
-type StatusData = z.infer<typeof StatusSchema>;
+import type { StatusData } from "@/lib/schemas";
 
 function statusSubtitle(data: StatusData | undefined): string {
   if (!data) return "Loading status…";
@@ -31,7 +24,7 @@ function statusSubtitle(data: StatusData | undefined): string {
 }
 
 export default function DashboardPage() {
-  const [, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const statusQuery = useStatusQuery();
   const bucketsQuery = useBucketsQuery();
 
@@ -63,10 +56,21 @@ export default function DashboardPage() {
         </Button>
       </div>
 
+      <CreateBucketDialog open={createOpen} onOpenChange={setCreateOpen} />
+
       {bucketsQuery.isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 6 }, (_, i) => (
-            <Card key={i} className="overflow-hidden">
+          {(
+            [
+              "bucket-skeleton-a",
+              "bucket-skeleton-b",
+              "bucket-skeleton-c",
+              "bucket-skeleton-d",
+              "bucket-skeleton-e",
+              "bucket-skeleton-f",
+            ] as const
+          ).map((slotId) => (
+            <Card key={slotId} className="overflow-hidden">
               <CardHeader className="space-y-2">
                 <Skeleton
                   className="h-8 w-8 rounded-md"
@@ -97,7 +101,9 @@ export default function DashboardPage() {
             strokeWidth={1.25}
           />
           <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">No buckets yet</p>
+            <p className="text-sm font-medium text-foreground">
+              No buckets yet
+            </p>
             <p className="text-xs text-muted-foreground">
               Create a bucket to start storing objects.
             </p>
@@ -109,7 +115,7 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {buckets.map((b) => (
-            <Link key={b.name} to={`/buckets/${encodeURIComponent(b.name)}`}>
+            <Link key={b.name} to={`/buckets/${b.name}`}>
               <Card className="h-full transition-colors hover:bg-accent">
                 <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-2">
                   <Package

@@ -88,3 +88,5 @@ export const ErrorEnvelopeSchema = z.object({
     details: z.record(z.string(), z.unknown()).optional(),
   }),
 });
+
+export type StatusData = z.infer<typeof StatusSchema>;
