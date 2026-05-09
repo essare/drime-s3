@@ -1,5 +1,6 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { mkdtemp, open, rm } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,7 +12,15 @@ import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
+import {
+  buildObjectDescription,
+  etagFromEntryDescription,
+  objectTaggingXml,
+  parseTaggingLine,
+} from "../tagging";
+import { copyObjectResultXml } from "../xml";
 import { findRootFolder, parseCreateFolderResponse } from "./bucket";
+import { resolveObjectKey } from "./object-resolve";
 
 function xmlErr(status: number, code: string, message: string): Response {
   return new Response(s3ErrorXml(code, message), {
@@ -27,9 +36,8 @@ function formatHttpDate(updatedAt: string | null): string {
 }
 
 function entryEtag(entry: FileEntry): string {
-  if (entry.description?.startsWith("md5:")) {
-    return `"${entry.description.slice(4)}"`;
-  }
+  const fromDesc = etagFromEntryDescription(entry.description);
+  if (fromDesc !== '"unknown"') return fromDesc;
   if (entry.hash) {
     return `"${entry.hash}"`;
   }
@@ -48,72 +56,6 @@ function resolveDownloadUrl(entry: FileEntry, ctx: AppContext): string {
   if (u?.startsWith("http")) return u;
   if (u) return joinUrlWithApiBase(ctx.config.drime.apiBaseUrl, u);
   return ctx.drime.getDownloadUrl(entry.id);
-}
-
-type KeyResolve =
-  | { kind: "file"; entry: FileEntry; parentFolderId: number }
-  | { kind: "folder"; entry: FileEntry; parentFolderId: number }
-  | { kind: "missing_prefix"; leafName: string }
-  | { kind: "missing_file"; parentFolderId: number; leafName: string };
-
-async function resolveObjectKey(
-  ctx: AppContext,
-  W: number,
-  bucketRootId: number,
-  bucket: string,
-  key: string,
-): Promise<KeyResolve> {
-  const trimmed = key.replace(/^\/+|\/+$/g, "");
-  if (!trimmed) {
-    return { kind: "missing_file", parentFolderId: bucketRootId, leafName: "" };
-  }
-  const parts = trimmed.split("/").filter(Boolean);
-  const leafName = parts[parts.length - 1] ?? "";
-  const parentSegments = parts.slice(0, -1);
-
-  let parentFolderId = bucketRootId;
-  let pathAccum = "";
-
-  for (const seg of parentSegments) {
-    pathAccum = pathAccum ? `${pathAccum}/${seg}` : seg;
-    const cacheKey = normalizePathKey(`${bucket}/${pathAccum}`);
-    const cached = ctx.folderCache.get(cacheKey);
-    if (cached !== undefined) {
-      parentFolderId = cached;
-      continue;
-    }
-    const entries = await ctx.listCache.getOrFetch(parentFolderId, () =>
-      ctx.drime.listFolder(parentFolderId, W),
-    );
-    const found = entries.find(
-      (e) => e.is_folder && e.name.toLowerCase() === seg.toLowerCase(),
-    );
-    if (!found) {
-      return { kind: "missing_prefix", leafName };
-    }
-    parentFolderId = found.id;
-    ctx.folderCache.set(cacheKey, found.id);
-  }
-
-  if (parentSegments.length > 0) {
-    ctx.folderCache.set(
-      normalizePathKey(`${bucket}/${parentSegments.join("/")}`),
-      parentFolderId,
-    );
-  }
-
-  const entries = await ctx.listCache.getOrFetch(parentFolderId, () =>
-    ctx.drime.listFolder(parentFolderId, W),
-  );
-  for (const e of entries) {
-    if (e.name === leafName) {
-      if (e.is_folder) {
-        return { kind: "folder", entry: e, parentFolderId };
-      }
-      return { kind: "file", entry: e, parentFolderId };
-    }
-  }
-  return { kind: "missing_file", parentFolderId, leafName };
 }
 
 async function ensureParentFolderForPut(
@@ -217,6 +159,137 @@ async function writeRequestBodyToTemp(
   return { tmpDir, tmpPath, md5Hex: hash.digest("hex") };
 }
 
+function parseCopySourceHeader(
+  raw: string | null,
+): { bucket: string; key: string } | null {
+  if (raw === null || raw.trim() === "") return null;
+  const decoded = decodeURIComponent(raw.trim());
+  const stripped = decoded.replace(/^\/+/, "");
+  const slash = stripped.indexOf("/");
+  if (slash < 0) return null;
+  return {
+    bucket: stripped.slice(0, slash),
+    key: stripped.slice(slash + 1),
+  };
+}
+
+function formatCopyLastModified(entry: FileEntry): string {
+  const t = entry.updated_at ? Date.parse(entry.updated_at) : NaN;
+  const d = Number.isFinite(t) ? new Date(t) : new Date();
+  return d.toISOString().replace(/\.\d+Z$/, ".000Z");
+}
+
+async function handlePutCopyObject(
+  ctx: AppContext,
+  W: number,
+  destBucket: string,
+  destKey: string,
+  destBucketRootId: number,
+  req: Request,
+  destResolved: Awaited<ReturnType<typeof resolveObjectKey>>,
+): Promise<Response> {
+  const parsed = parseCopySourceHeader(req.headers.get("x-amz-copy-source"));
+  if (!parsed || !isValidBucketName(parsed.bucket)) {
+    return xmlErr(400, "InvalidArgument", "Invalid x-amz-copy-source.");
+  }
+
+  const srcBucketFolder = await findRootFolder(ctx, W, parsed.bucket);
+  if (srcBucketFolder === undefined) {
+    return xmlErr(
+      404,
+      "NoSuchBucket",
+      "The specified copy source bucket does not exist.",
+    );
+  }
+
+  const srcResolved = await resolveObjectKey(
+    ctx,
+    W,
+    srcBucketFolder.id,
+    parsed.bucket,
+    parsed.key,
+  );
+  if (srcResolved.kind !== "file") {
+    return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
+  }
+  const srcEntry = srcResolved.entry;
+  const downloadUrl = resolveDownloadUrl(srcEntry, ctx);
+  const upstream = await ctx.drime.fetchAuthenticated(downloadUrl, {
+    method: "GET",
+  });
+  if (!upstream.ok) {
+    return xmlErr(500, "CopyFailed", "Could not read copy source.");
+  }
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  const md5Hex = createHash("md5").update(buf).digest("hex");
+
+  const ensured = await ensureParentFolderForPut(
+    ctx,
+    W,
+    destBucketRootId,
+    destBucket,
+    destKey,
+  );
+  if (!ensured.ok) {
+    return ensured.response;
+  }
+  const parentId = ensured.parentId;
+
+  const trimmed = destKey.replace(/^\/+|\/+$/g, "");
+  const basename = trimmed.includes("/")
+    ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
+    : trimmed;
+  const relativePath = parentId === destBucketRootId ? trimmed : basename;
+
+  let tmpDir = "";
+  try {
+    tmpDir = await mkdtemp(join(tmpdir(), "drime-s3-copy-"));
+    const tmpPath = join(tmpDir, "src.bin");
+    await writeFile(tmpPath, buf);
+
+    if (destResolved.kind === "file" || destResolved.kind === "folder") {
+      await ctx.drime.deleteEntriesForever([destResolved.entry.id]);
+      ctx.listCache.invalidate(destResolved.parentFolderId);
+    }
+
+    const uploadRaw = await ctx.drime.uploadFile({
+      filePath: tmpPath,
+      relativePath,
+      parentId,
+      workspaceId: W,
+    });
+    const uploadedId = parseUploadFileEntryId(uploadRaw);
+    if (uploadedId !== undefined) {
+      try {
+        await ctx.drime.updateFileEntryDescription(
+          uploadedId,
+          buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
+        );
+      } catch {
+        /* optional Drime feature */
+      }
+    }
+    ctx.listCache.invalidate(parentId);
+
+    const xml = copyObjectResultXml({
+      etag: `"${md5Hex}"`,
+      lastModified: formatCopyLastModified(srcEntry),
+    });
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/xml",
+      },
+    });
+  } catch {
+    return xmlErr(500, "InternalError", "Copy failed.");
+  } finally {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
 function pickDownloadResponseHeaders(
   upstream: Response,
 ): Record<string, string> {
@@ -267,6 +340,21 @@ export async function handleObjectRequest(
   const bucketRootId = bucketFolder.id;
 
   const resolved = await resolveObjectKey(ctx, W, bucketRootId, bucket, key);
+
+  if (method === "GET" && url.searchParams.has("tagging")) {
+    if (
+      resolved.kind === "missing_prefix" ||
+      resolved.kind === "missing_file" ||
+      resolved.kind === "folder"
+    ) {
+      return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
+    }
+    const xml = objectTaggingXml(parseTaggingLine(resolved.entry.description));
+    return new Response(xml, {
+      status: 200,
+      headers: { "Content-Type": "application/xml" },
+    });
+  }
 
   if (method === "HEAD") {
     if (
@@ -346,12 +434,14 @@ export async function handleObjectRequest(
 
   if (method === "PUT") {
     if (req.headers.get("x-amz-copy-source")) {
-      return new Response(
-        s3ErrorXml("NotImplemented", "CopyObject is not implemented yet."),
-        {
-          status: 501,
-          headers: { "Content-Type": "application/xml" },
-        },
+      return handlePutCopyObject(
+        ctx,
+        W,
+        bucket,
+        key,
+        bucketRootId,
+        req,
+        resolved,
       );
     }
 
@@ -394,7 +484,7 @@ export async function handleObjectRequest(
         try {
           await ctx.drime.updateFileEntryDescription(
             uploadedId,
-            `md5:${md5Hex}`,
+            buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
           );
         } catch {
           /* optional Drime feature */

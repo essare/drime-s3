@@ -179,6 +179,7 @@ export async function dispatch(
         bucket,
         url,
         workspaceId: W,
+        req,
       });
       if (hit !== null) {
         return withRequestId(hit, rid);

@@ -8,6 +8,7 @@ import {
   bucketLocationXml,
   bucketVersioningXml,
 } from "../xml";
+import { handleDeleteObjects } from "./batch";
 import { handleListObjects } from "./list-objects";
 
 function xmlErr(status: number, code: string, message: string): Response {
@@ -49,9 +50,10 @@ export async function handleBucketOnly(
     bucket: string;
     url: URL;
     workspaceId: number;
+    req: Request;
   },
 ): Promise<Response | null> {
-  const { method, bucket, url, workspaceId: W } = input;
+  const { method, bucket, url, workspaceId: W, req } = input;
 
   if (!isValidBucketName(bucket)) {
     return xmlErr(
@@ -59,6 +61,11 @@ export async function handleBucketOnly(
       "InvalidBucketName",
       `The specified bucket is not valid.`,
     );
+  }
+
+  if (method === "POST" && url.searchParams.has("delete")) {
+    const bodyText = await req.text();
+    return handleDeleteObjects(ctx, { bucket, bodyText, workspaceId: W });
   }
 
   if (method === "PUT") {

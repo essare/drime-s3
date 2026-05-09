@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
+import { etagFromEntryDescription } from "../tagging";
 import { type ListBucketEntry, listBucketResultXml } from "../xml";
 
 const NOT_FOUND = Symbol("not-found");
@@ -50,9 +51,8 @@ function formatIso(updatedAt: string | null): string {
 }
 
 function entryEtag(entry: FileEntry): string {
-  if (entry.description?.startsWith("md5:")) {
-    return `"${entry.description.slice(4)}"`;
-  }
+  const fromDesc = etagFromEntryDescription(entry.description);
+  if (fromDesc !== '"unknown"') return fromDesc;
   if (entry.hash) {
     return `"${entry.hash}"`;
   }
