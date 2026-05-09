@@ -1,0 +1,1133 @@
+openapi: 3.0.0
+info:
+  description: 'Access token should be sent along with every request to SITE_NAME API in authorization header: `Authorization: Bearer <Token>` <br> This token can either be acquired via `auth/login` endpoint or from account settings page on [SITE_NAME website](SITE_URL/account/settings).'
+  version: '1.0.0'
+  title: SITE_NAME API
+security:
+  - accessToken: []
+tags:
+  - name: Uploads
+    description: Upload files to SITE_NAME
+  - name: Auth
+    description: Authenticate requests to the API
+  - name: Files and Folders
+    description: FileEntry refers to either a file or folder on SITE_NAME
+  - name: Sharing
+    description: Manage file entry collaborators
+  - name: Starring
+    description: Mark or unmark entries as starred
+  - name: Shareable Links
+    description: Manage shareable links for file or folder
+paths:
+  /uploads:
+    post:
+      tags:
+        - Uploads
+      summary: Upload a file to SITE_NAME
+      operationId: upload
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Content of file to upload to SITE_NAME
+                parentId:
+                  type: integer
+                  description: ID of folder where this file should be uploaded, `null` will upload to root
+                  example: null
+                relativePath:
+                  type: string
+                  description: "Folders in the path provided here will be auto created, if they don't exist already. This is mainly useful when uploading a folder from browser. It should include original filename as well: <br> `/some/folders/here/file-name.jpg`"
+      responses:
+        '201':
+          description: File was uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  fileEntry:
+                    $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+  /drive/file-entries:
+    get:
+      tags:
+        - Files and Folders
+      summary: Get file entries
+      description: Get the list of all file entries you have access to
+      operationId: indexEntry
+      parameters:
+        - name: perPage
+          in: query
+          description: How many entries to return per page
+          schema:
+            type: 'integer'
+            format: 'int64'
+            default: 50
+        - name: deletedOnly
+          in: query
+          description: Whether only trashed entries should be returned
+          schema:
+            type: 'boolean'
+        - name: starredOnly
+          in: query
+          description: Whether only starred entries should be returned
+          schema:
+            type: 'boolean'
+        - name: recentOnly
+          in: query
+          description: Whether only recent entries should be returned
+          schema:
+            type: 'boolean'
+        - name: sharedOnly
+          in: query
+          description: Whether only entries that have been shared with you should be returned
+          schema:
+            type: 'boolean'
+        - name: query
+          in: query
+          description: Search query entry names should be filtered on
+          schema:
+            type: 'string'
+        - name: type
+          in: query
+          description: File type entries should be filtered on
+          schema:
+            type: 'string'
+            enum:
+              - 'folder'
+              - 'image'
+              - 'text'
+              - 'audio'
+              - 'video'
+              - 'pdf'
+        - name: parentIds
+          in: query
+          description: Only entries that are children of specified folders will be returned
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: workspaceId
+          in: query
+          description: Only return entries in specified workspace
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+  /file-entries:
+    delete:
+      tags:
+        - Files and Folders
+      summary: Move entries to trash or delete permanently
+      operationId: entriesDelete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entryIds:
+                  description: list of entry IDs to delete
+                  type: array
+                  items:
+                    type: string
+                deleteForever:
+                  description: Whether entries should be deleted permantently, instead of being moved to trash
+                  type: string
+                  example: false
+      responses:
+        '200':
+          description: Entries deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /file-entries/{entryId}:
+    put:
+      tags:
+        - Files and Folders
+      summary: Update an existing file entry
+      parameters:
+        - in: path
+          name: entryId
+          schema:
+            type: integer
+          required: true
+      operationId: entryUpdate
+      responses:
+        '200':
+          description: Entry updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  fileEntry:
+                    $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: 'New name for the entry'
+                description:
+                  type: string
+                  example: 'New description for the entry'
+
+  /folders:
+    post:
+      tags:
+        - Files and Folders
+      summary: Create a new folder
+      operationId: createFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: 'new folder name'
+                parentId:
+                  type: integer
+                  description: 'ID of parent folder or null if it should be created at root'
+                  example: null
+      responses:
+        '200':
+          description: Folder created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  folder:
+                    $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /file-entries/move:
+    post:
+      tags:
+        - Files and Folders
+      summary: Movie specified entries to a different folder
+      operationId: entriesMove
+      responses:
+        '200':
+          description: File entries moved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entryIds
+              properties:
+                entryIds:
+                  description: List of entry ids
+                  type: array
+                  items:
+                    type: integer
+                    format: 'int32'
+                destinationId:
+                  type: integer
+                  format: 'int32'
+                  description: ID of folder specified entries should be moved to
+                  example: null
+  /file-entries/duplicate:
+    post:
+      tags:
+        - Files and Folders
+      summary: Duplicate specified entries
+      operationId: entriesCopy
+      responses:
+        '200':
+          description: File entries duplicated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FileEntry'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entryIds
+              properties:
+                entryIds:
+                  description: List of entry ids
+                  type: array
+                  items:
+                    type: integer
+                    format: 'int32'
+                destinationId:
+                  type: integer
+                  format: 'int32'
+                  description: ID of folder specified entries should be moved to
+                  example: null
+  /file-entries/restore:
+    post:
+      tags:
+        - Files and Folders
+      summary: Restore file entries from trash to original folder
+      operationId: entriesRestore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entryIds
+              properties:
+                entryIds:
+                  description: List of entry IDs
+                  type: array
+                  items:
+                    type: integer
+                    format: 'int32'
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /file-entries/{entryId}/share:
+    post:
+      tags:
+        - Sharing
+      summary: Share file or folder with specified users
+      parameters:
+        - in: path
+          name: entryId
+          schema:
+            type: integer
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emails:
+                  type: array
+                  items:
+                    type: string
+                    example: example@gmail.com
+                permissions:
+                  type: array
+                  items:
+                    type: string
+                    example: edit
+                    enum:
+                      - view
+                      - edit
+                      - download
+      responses:
+        '200':
+          description: Shared file entry successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+  /file-entries/{entryId}/change-permissions:
+    put:
+      tags:
+        - Sharing
+      summary: Change permissions user has for shared entries
+      parameters:
+        - in: path
+          name: entryId
+          schema:
+            type: integer
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: integer
+                permissions:
+                  type: array
+                  items:
+                    type: string
+                    example: edit
+                    enum:
+                      - view
+                      - edit
+                      - download
+      responses:
+        '200':
+          description: Changed permissions successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+  /file-entries/{entryId}/unshare:
+    delete:
+      tags:
+        - Sharing
+      summary: Unshare file or folder with specified user
+      parameters:
+        - in: path
+          name: entryId
+          schema:
+            type: integer
+            example: 1
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: integer
+      responses:
+        '200':
+          description: Unshared file entry successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /file-entries/star:
+    post:
+      tags:
+        - Starring
+      summary: Mark specified entries as starred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entryIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Marked as starred successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  tag:
+                    $ref: '#/components/schemas/Tag'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+  /file-entries/unstar:
+    post:
+      tags:
+        - Starring
+      summary: Unmark specified entries as starred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entryIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Unmarked as starred successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  tag:
+                    $ref: '#/components/schemas/Tag'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /file-entries/{entryId}/shareable-link:
+    get:
+      tags:
+        - Shareable Links
+      summary: Retrieve shareable link for specified entry
+      operationId: getShareableLink
+      parameters:
+        - name: entryId
+          in: path
+          description: ID or hash of entry for which to get shareable link
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shareable-Link-Response'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '404':
+          description: File entry or shareable link not found
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+    post:
+      tags:
+        - Shareable Links
+      summary: Create new shareable link for specified entry
+      operationId: createShareableLink
+      parameters:
+        - name: entryId
+          in: path
+          description: ID or hash of entry for which to get shareable link
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  example: 'new password'
+                expires_at:
+                  type: string
+                  description: '2021-03-06T17:34:00.000000Z'
+                allow_edit:
+                  type: boolean
+                  example: false
+                allow_download:
+                  type: boolean
+                  example: false
+      responses:
+        '200':
+          description: Shareable link created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  link:
+                    $ref: '#/components/schemas/ShareableLink'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+  /file_entries/{entryId}/shareable-link:
+    put:
+      tags:
+        - Shareable Links
+      summary: Update shareable link details
+      operationId: updateShareableLink
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  example: 'new password'
+                expires_at:
+                  type: string
+                  description: '2021-03-06T17:34:00.000000Z'
+                allow_edit:
+                  type: boolean
+                  example: false
+                allow_download:
+                  type: boolean
+                  example: false
+      responses:
+        '200':
+          description: Shareable link updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  link:
+                    $ref: '#/components/schemas/ShareableLink'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '404':
+          description: Shareable link not found
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+    delete:
+      tags:
+        - Shareable Links
+      summary: Delete shareable link by ID
+      operationId: deleteShareableLink
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Shareable link deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '404':
+          description: Shareable link not found
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+
+  /auth/register:
+    post:
+      security: []
+      tags:
+        - Auth
+      summary: Register for a new account
+      operationId: register
+      responses:
+        '200':
+          description: User registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: 'example@gmail.com'
+                password:
+                  type: string
+                  example: 'password'
+                device_name:
+                  type: string
+                  example: 'iphone 12'
+  /auth/login:
+    post:
+      security: []
+      tags:
+        - Auth
+      summary: Get access token
+      description: 'Logs in specified user and returns user object along with access token. <br><br> Access Token is a string that enables SITE_NAME to verify that a request belongs to an authorized session. This token should be sent along with every request to SITE_NAME API in a authorization header: `Authorization: Bearer <Token>`.'
+      operationId: login
+      responses:
+        '200':
+          description: Operation successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/schemas/401-Response'
+        '403':
+          $ref: '#/components/schemas/403-Response'
+        '422':
+          description: Invalid data specified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/422-Response'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: 'example@gmail.com'
+                password:
+                  type: string
+                  example: 'password'
+                device_name:
+                  type: string
+                  example: 'iphone 12'
+components:
+  schemas:
+    FileEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          example: image.png
+        file_name:
+          type: string
+          example: j6oWHDG1z613UqFHLZpE1Yrqngw0N8XLuGNLNWJV
+          description: actual file name for this entry on storage
+        file_size:
+          type: integer
+          format: int64
+          example: 111863
+          description: In bytes
+        parent_id:
+          type: integer
+          format: int64
+          example: 1
+          description: Parent folder ID
+        parent:
+          $ref: '#/components/schemas/FileEntry'
+        thumbnail:
+          type: string
+          example: thumbnail.png
+          description: Relative path to thumbnail image for the file (if it exists)
+        mime:
+          type: string
+          example: image/png
+        url:
+          type: string
+          example: secure/uploads/3260
+          description: relative url for previewing file or folder contents
+        hash:
+          type: string
+          example: MzI2MHxwYWRkaQ
+        type:
+          type: string
+          enum:
+            - 'image'
+            - 'folder'
+            - 'text'
+            - 'audio'
+            - 'video'
+            - 'pdf'
+        description:
+          type: string
+          example: Example description entered by user
+        deleted_at:
+          type: string
+          example: '2021-02-23T14:42:38.000000Z'
+          description: date entry was moved to trash (if it's in trash currently)
+        created_at:
+          type: string
+          example: '2021-02-23T14:42:38.000000Z'
+          description: date entry was uploaded
+        updated_at:
+          type: string
+          example: '2021-02-23T14:42:38.000000Z'
+          description: date entry was last modified (content, name or location changed)
+        path:
+          type: string
+          example: '3260/3261/3262'
+          description: full path of parent folder IDs for this entry up to root
+        users:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                format: int64
+              email:
+                type: string
+                example: 'example@gmail.com'
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        access_token:
+          type: string
+          description: Access token that can be used to authenticate API requests for this user
+        display_name:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        created_at:
+          type: string
+          example: '2021-02-23T14:42:38.000000Z'
+        updated_at:
+          type: string
+          example: '2021-02-23T14:42:38.000000Z'
+    Tag:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+      xml:
+        name: Tag
+    ShareableLink:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        hash:
+          type: string
+          example: 3h8N1nxZq7WtyRmXDIosFupSl9MCrD
+          description: ID for link that will be visible in url
+        password:
+          type: string
+          example: $2y$10$BI8kz6zFeB0CA0P425eMSe7KJcm8OKjWijHTQrRP.cjqRtynMq4Sy
+          description: Passwords are hashed, so this will not match the password that was entered in plain text
+        user_id:
+          type: integer
+          format: int64
+          description: ID of user that created this link
+        entry_id:
+          type: integer
+          format: int64
+          description: ID of file entry this link is attached to
+        entry:
+          $ref: '#/components/schemas/FileEntry'
+        expires_at:
+          type: string
+          example: '2021-03-06T17:34:00.000000Z'
+        allow_edit:
+          type: boolean
+          example: false
+        allow_download:
+          type: boolean
+          example: false
+    Shareable-Link-Response:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        link:
+          $ref: '#/components/schemas/ShareableLink'
+        folderChildren:
+          description: If link is for folder, this will list immediate children of that folder
+          type: array
+          items:
+            $ref: '#/components/schemas/FileEntry'
+        errors:
+          type: object
+          properties:
+            some_data_1:
+              type: string
+              example: Error message for data 1
+            some_data_2:
+              type: string
+              example: Error message for data 2
+    401-Response:
+      description: Unauthenticated. Either access token is not provided or is invalid.
+    403-Response:
+      description: Unauthorized access. You don't have permissions required to perform this operation.
+    422-Response:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        message:
+          type: string
+          example: 'Reason for the error'
+        errors:
+          type: object
+          properties:
+            some_data_1:
+              type: string
+              example: Error message for data 1
+            some_data_2:
+              type: string
+              example: Error message for data 2
+
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer

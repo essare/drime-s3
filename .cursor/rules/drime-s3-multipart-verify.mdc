@@ -1,0 +1,25 @@
+---
+description: After S3 multipart or Drime client changes, verify with gateway + AWS CLI (not only unit tests).
+globs: src/s3/handlers/multipart.ts,src/drime/client.ts,src/s3/router.ts
+alwaysApply: false
+---
+
+# Multipart / large-upload verification
+
+When you change **multipart upload**, **`DrimeClient`** S3 multipart paths, or **router** wiring for uploads:
+
+1. **Always run** (no real Drime credentials needed):
+
+   ```bash
+   bun run smoke:large:aws:selftest
+   ```
+
+   This starts mock Drime + gateway (Sig V4), creates a **10 MiB** sparse `scripts/bin/payload.bin`, runs **`aws s3 cp`** up/down with SHA-256 check, then tears down.
+
+2. **When the user’s machine has real Drime + `aws` configured** (same S3 keys as `bun run start`), also:
+
+   - Start the gateway: `bun run start` (or `bun run src/cli/main.ts serve` with their config).
+   - Run the same **`aws s3 cp`** they use for large files (e.g. `payload-10GB.zip` → `s3://production/...` with `--endpoint-url` and `--region drime`).
+   - Confirm exit code **0** before claiming the fix works against production Drime.
+
+Do not mark multipart-related work complete on unit tests alone if the user cares about **AWS CLI / real Drime** behavior.
