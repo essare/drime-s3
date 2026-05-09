@@ -198,7 +198,11 @@ export class DrimeClient {
   }): Promise<unknown> {
     const workspaceId = params.workspaceId ?? 0;
     const form = new FormData();
-    form.append("file", Bun.file(params.filePath));
+    const rp = params.relativePath.replace(/^\/+/, "");
+    const multipartFileName = rp.includes("/")
+      ? (rp.split("/").pop() ?? "file")
+      : rp || "file";
+    form.append("file", Bun.file(params.filePath), multipartFileName);
     form.append("relativePath", params.relativePath);
     form.append("workspaceId", String(workspaceId));
     if (params.parentId !== undefined) {
