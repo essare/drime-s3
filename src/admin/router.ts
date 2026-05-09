@@ -1,7 +1,7 @@
 import type { AppContext } from "../server-context";
 import { jsonError } from "./errors";
 import { handleHealth } from "./handlers/health";
-import { handleLogin } from "./handlers/session";
+import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
 
 export async function dispatchAdmin(
   ctx: AppContext,
@@ -26,6 +26,12 @@ export async function dispatchAdmin(
 
   if (method === "POST" && path === "/_admin/login") {
     return handleLogin(ctx, req, url);
+  }
+  if (method === "POST" && path === "/_admin/logout") {
+    return handleLogout(ctx, req, url);
+  }
+  if (method === "GET" && path === "/_admin/session") {
+    return handleGetSession(ctx, req);
   }
 
   // Real route table grows in later tasks.

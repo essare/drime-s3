@@ -1,6 +1,11 @@
 import type { AppContext } from "../../server-context";
 import { checkAndRecordLoginAttempt, verifyPassword } from "../auth";
-import { buildSetCookie, signSessionToken } from "../cookies";
+import {
+  buildSetCookie,
+  parseCookieHeader,
+  signSessionToken,
+  verifySessionToken,
+} from "../cookies";
 import { jsonError, jsonOk } from "../errors";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -60,4 +65,36 @@ export async function handleLogin(
   const res = jsonOk({ authenticated: true, expiresInSec: SESSION_TTL_MS / 1000 });
   res.headers.append("Set-Cookie", cookie);
   return res;
+}
+
+export async function handleLogout(
+  _ctx: AppContext,
+  req: Request,
+  url: URL,
+): Promise<Response> {
+  const cookie = buildSetCookie("drime_admin", "", {
+    expire: true,
+    secure: isHttps(req, url),
+  });
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Set-Cookie": cookie,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+export async function handleGetSession(
+  ctx: AppContext,
+  req: Request,
+): Promise<Response> {
+  const raw = parseCookieHeader(req.headers.get("cookie"), "drime_admin");
+  if (!raw) return jsonOk({ authenticated: false, expiresAt: null });
+  const v = await verifySessionToken(raw, ctx.webUi.sessionSecret, Date.now());
+  if (!v.ok) return jsonOk({ authenticated: false, expiresAt: null });
+  return jsonOk({
+    authenticated: true,
+    expiresAt: new Date(v.payload.exp).toISOString(),
+  });
 }

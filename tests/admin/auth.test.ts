@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { startAdmin } from "./helpers";
+import { loginCookie, startAdmin } from "./helpers";
 
 function loginReq(body: unknown, ip = "1.2.3.4"): Request {
   return new Request("http://127.0.0.1:8081/_admin/login", {
@@ -81,6 +81,58 @@ describe("POST /_admin/login", () => {
       const res = await setup.call(loginReq({ password: "x" }));
       expect(res.status).toBe(503);
       expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AdminDisabled");
+    } finally {
+      setup.cleanup();
+    }
+  });
+});
+
+describe("/_admin/logout and /_admin/session", () => {
+  test("GET /_admin/session without cookie → { authenticated: false }", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const res = await setup.call(
+        new Request("http://127.0.0.1:8081/_admin/session", {
+          headers: { Host: "127.0.0.1:8081" },
+        }),
+      );
+      expect(res.status).toBe(200);
+      const j = (await res.json()) as { authenticated: boolean };
+      expect(j.authenticated).toBe(false);
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("GET /_admin/session with valid cookie → authenticated:true and expiresAt", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request("http://127.0.0.1:8081/_admin/session", {
+          headers: { Host: "127.0.0.1:8081", Cookie: cookie },
+        }),
+      );
+      expect(res.status).toBe(200);
+      const j = (await res.json()) as { authenticated: boolean; expiresAt: string };
+      expect(j.authenticated).toBe(true);
+      expect(typeof j.expiresAt).toBe("string");
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("POST /_admin/logout returns 204 and Max-Age=0 cookie (idempotent)", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const res = await setup.call(
+        new Request("http://127.0.0.1:8081/_admin/logout", {
+          method: "POST",
+          headers: { Host: "127.0.0.1:8081" },
+        }),
+      );
+      expect(res.status).toBe(204);
+      expect(res.headers.get("set-cookie") ?? "").toContain("Max-Age=0");
     } finally {
       setup.cleanup();
     }
