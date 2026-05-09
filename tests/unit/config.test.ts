@@ -9,6 +9,7 @@ describe("loadConfig", () => {
     delete process.env.DRIME_S3_INSECURE;
     delete process.env.DRIME_GATEWAY_WORKSPACE_NAME;
     delete process.env.DRIME_GATEWAY_WORKSPACE_ID;
+    delete process.env.DRIME_API_BASE_URL;
   });
   afterEach(() => {
     delete process.env.DRIME_API_KEY;
@@ -17,6 +18,7 @@ describe("loadConfig", () => {
     delete process.env.DRIME_S3_INSECURE;
     delete process.env.DRIME_GATEWAY_WORKSPACE_NAME;
     delete process.env.DRIME_GATEWAY_WORKSPACE_ID;
+    delete process.env.DRIME_API_BASE_URL;
   });
 
   test("env overrides file for api key", async () => {
@@ -24,6 +26,13 @@ describe("loadConfig", () => {
     process.env.DRIME_API_KEY = "env-key";
     const c = await loadConfig({ configPath: "/nonexistent.toml" });
     expect(c.drime.apiKey).toBe("env-key");
+  });
+
+  test("DRIME_API_BASE_URL override", async () => {
+    process.env.DRIME_S3_INSECURE = "1";
+    process.env.DRIME_API_BASE_URL = "https://example.test/api/v1";
+    const c = await loadConfig({ configPath: "/nonexistent.toml" });
+    expect(c.drime.apiBaseUrl).toBe("https://example.test/api/v1");
   });
 
   test("default gateway workspace name is drime-s3", async () => {

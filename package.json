@@ -3,8 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "drime-s3": "src/cli/main.ts"
+  },
   "scripts": {
     "dev": "bun --hot run src/cli/main.ts serve",
+    "start": "bun run src/cli/main.ts serve",
+    "smoke:real": "bun run scripts/real-upload-smoke.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",

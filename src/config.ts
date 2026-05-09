@@ -134,6 +134,9 @@ function applyToml(cfg: AppConfig, root: TomlRoot): void {
 }
 
 function applyEnv(cfg: AppConfig): void {
+  const apiBase = pickNonEmptyString(process.env.DRIME_API_BASE_URL);
+  if (apiBase !== undefined) cfg.drime.apiBaseUrl = apiBase;
+
   const apiKey = pickNonEmptyString(process.env.DRIME_API_KEY);
   if (apiKey !== undefined) cfg.drime.apiKey = apiKey;
 
@@ -215,7 +218,7 @@ function ensureS3Keys(cfg: AppConfig): void {
   }
 }
 
-function resolveConfigPath(configPath?: string): string {
+export function resolveConfigPath(configPath?: string): string {
   if (configPath !== undefined && configPath !== "") {
     if (configPath.startsWith("~/")) {
       return path.join(homedir(), configPath.slice(2));
