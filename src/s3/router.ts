@@ -172,6 +172,10 @@ export async function dispatch(
       listTtlCache: ctx.listCache.size,
       listTtlInflight: ctx.listCache.inflightSize,
       multipartSessions: ctx.multipartStore.size,
+      webUi: {
+        passwordSet: ctx.webUi.enabled,
+        activeSessions: ctx.webUi.activeSessions(),
+      },
     });
     return new Response(body, {
       status: 200,

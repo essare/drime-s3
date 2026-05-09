@@ -107,6 +107,11 @@ async function main(): Promise<void> {
     if (cmd === "serve") {
       const cfg = await loadMergedConfig(flags);
       assertSafeInsecureBind(cfg, flags.iKnowWhatImDoing);
+      if (!cfg.webUi.password) {
+        console.warn(
+          "*** WEB_UI_PASSWORD is not set. The admin UI is disabled (only the S3 API is reachable). Set WEB_UI_PASSWORD to enable. ***",
+        );
+      }
       if (cfg.insecure) {
         console.warn(
           "*** DRIME_S3 INSECURE: S3 request authentication is NOT verified. Do not expose this process publicly without TLS and Sig V4. ***",

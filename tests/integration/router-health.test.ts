@@ -61,10 +61,14 @@ describe("S3 router", () => {
       });
       const res = await dispatch(ctx, req);
       expect(res.status).toBe(200);
-      const j = (await res.json()) as Record<string, number>;
+      const j = (await res.json()) as Record<string, unknown>;
       expect(typeof j.folderPathCache).toBe("number");
       expect(typeof j.listTtlCache).toBe("number");
       expect(typeof j.multipartSessions).toBe("number");
+      expect(j.webUi).toBeDefined();
+      const w = j.webUi as { passwordSet: boolean; activeSessions: number };
+      expect(typeof w.passwordSet).toBe("boolean");
+      expect(typeof w.activeSessions).toBe("number");
     } finally {
       mock.stop();
     }
