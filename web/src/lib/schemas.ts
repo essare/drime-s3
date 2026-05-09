@@ -11,6 +11,11 @@ export const SessionSchema = z.object({
   expiresAt: z.string().nullable(),
 });
 
+export const LoginResponseSchema = z.object({
+  authenticated: z.literal(true),
+  expiresInSec: z.number(),
+});
+
 export const StatusSchema = z.object({
   env: z.object({
     drimeApiKeySet: z.boolean(),
