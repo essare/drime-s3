@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { startAdmin } from "./helpers";
 
 describe("admin/dispatch (front-of-line)", () => {
@@ -58,7 +60,7 @@ describe("admin/dispatch (front-of-line)", () => {
     }
   });
 
-  test("/_ui/* returns 404 in Plan A (stub)", async () => {
+  test("/_ui/index.html is served when web/dist exists, otherwise 404", async () => {
     const setup = await startAdmin();
     try {
       const res = await setup.call(
@@ -66,7 +68,22 @@ describe("admin/dispatch (front-of-line)", () => {
           headers: { Host: "127.0.0.1:8081" },
         }),
       );
-      expect(res.status).toBe(404);
+      const distIndex = path.resolve(
+        import.meta.dir,
+        "..",
+        "..",
+        "web",
+        "dist",
+        "index.html",
+      );
+      const hasDist = existsSync(distIndex);
+      if (hasDist) {
+        expect(res.status).toBe(200);
+        expect(res.headers.get("Content-Type")).toContain("text/html");
+      } else {
+        expect(res.status).toBe(404);
+      }
+      expect([403, 500]).not.toContain(res.status);
     } finally {
       setup.cleanup();
     }
