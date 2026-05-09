@@ -52,9 +52,25 @@ export function decodeCompositeUploadId(
   throw new InvalidUploadIdError("Invalid UploadId");
 }
 
+/** One uploaded part (S3 → Drime signed PUT). */
+export type MultipartPartRecord = {
+  partNumber: number;
+  size: number;
+  md5: string;
+  etag: string;
+};
+
+/** Gateway-side state for an in-flight S3 multipart upload (keyed by composite S3 UploadId). */
 export type MultipartSession = {
+  /** S3 object key (logical). */
   key: string;
-  parts: Array<{ size: number; md5: string; etag: string }>;
+  bucket: string;
+  /** Drime multipart identifiers returned by `POST /s3/multipart/create`. */
+  drimeUid: string;
+  drimeKey: string;
+  /** Drime parent folder id for the final `POST /s3/entries` row. */
+  parentId: number;
+  parts: MultipartPartRecord[];
   createdAt: number;
 };
 

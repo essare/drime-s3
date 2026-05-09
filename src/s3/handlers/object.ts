@@ -58,7 +58,7 @@ function resolveDownloadUrl(entry: FileEntry, ctx: AppContext): string {
   return ctx.drime.getDownloadUrl(entry.id);
 }
 
-async function ensureParentFolderForPut(
+export async function ensureParentFolderForPut(
   ctx: AppContext,
   W: number,
   bucketRootId: number,
@@ -306,7 +306,7 @@ function pickDownloadResponseHeaders(
 
 /**
  * Single-object S3 routes under `/<bucket>/<key>`.
- * @returns `null` when multipart query params should be handled elsewhere (501 for now).
+ * @returns `null` when multipart query params should be handled in `handlers/multipart.ts`.
  */
 export async function handleObjectRequest(
   ctx: AppContext,

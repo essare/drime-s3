@@ -174,6 +174,50 @@ export function completeMultipartUploadXml(opts: {
   return withDecl(listBuilder.build(obj));
 }
 
+/** GET ?uploadId — ListParts (minimal fields for backup clients). */
+export function listPartsResultXml(opts: {
+  bucket: string;
+  key: string;
+  uploadId: string;
+  maxParts: number;
+  isTruncated: boolean;
+  nextPartNumberMarker?: string;
+  parts: {
+    partNumber: number;
+    lastModified: string;
+    etag: string;
+    size: number;
+  }[];
+}): string {
+  const partNodes =
+    opts.parts.length === 0
+      ? {}
+      : {
+          Part: opts.parts.map((p) => ({
+            PartNumber: p.partNumber,
+            LastModified: p.lastModified,
+            ETag: p.etag,
+            Size: p.size,
+          })),
+        };
+  const root: Record<string, unknown> = {
+    ListPartsResult: {
+      ...xmlnsAttrs(),
+      Bucket: opts.bucket,
+      Key: opts.key,
+      UploadId: opts.uploadId,
+      MaxParts: opts.maxParts,
+      IsTruncated: opts.isTruncated ? "true" : "false",
+      ...partNodes,
+    },
+  };
+  if (opts.nextPartNumberMarker !== undefined) {
+    (root.ListPartsResult as Record<string, unknown>).NextPartNumberMarker =
+      opts.nextPartNumberMarker;
+  }
+  return withDecl(listBuilder.build(root));
+}
+
 export function copyObjectResultXml(opts: {
   etag: string;
   lastModified: string;

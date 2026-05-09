@@ -32,11 +32,35 @@ describe("MultipartSessionStore", () => {
   test("evicts oldest when at cap", () => {
     let t = 0;
     const store = new MultipartSessionStore({ maxSessions: 2, now: () => t });
-    store.set("a", { key: "k", parts: [], createdAt: t });
+    store.set("a", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "u",
+      drimeKey: "dk",
+      parentId: 1,
+      parts: [],
+      createdAt: t,
+    });
     t += 1;
-    store.set("b", { key: "k", parts: [], createdAt: t });
+    store.set("b", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "u2",
+      drimeKey: "dk2",
+      parentId: 1,
+      parts: [],
+      createdAt: t,
+    });
     t += 1;
-    store.set("c", { key: "k", parts: [], createdAt: t });
+    store.set("c", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "u3",
+      drimeKey: "dk3",
+      parentId: 1,
+      parts: [],
+      createdAt: t,
+    });
     expect(store.get("a")).toBeUndefined();
     expect(store.get("b")).toBeDefined();
     expect(store.get("c")).toBeDefined();
@@ -46,7 +70,15 @@ describe("MultipartSessionStore", () => {
   test("TTL drops session on get", () => {
     let t = 1000;
     const store = new MultipartSessionStore({ ttlMs: 5000, now: () => t });
-    store.set("u1", { key: "k", parts: [], createdAt: t });
+    store.set("u1", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "ux",
+      drimeKey: "dkx",
+      parentId: 1,
+      parts: [],
+      createdAt: t,
+    });
     t += 6000;
     expect(store.get("u1")).toBeUndefined();
     expect(store.size).toBe(0);
@@ -55,11 +87,31 @@ describe("MultipartSessionStore", () => {
   test("update same id does not evict others", () => {
     const t0 = 1_700_000_000_000;
     const store = new MultipartSessionStore({ maxSessions: 2, now: () => t0 });
-    store.set("a", { key: "k", parts: [], createdAt: t0 });
-    store.set("b", { key: "k", parts: [], createdAt: t0 });
+    store.set("a", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "ua",
+      drimeKey: "dka",
+      parentId: 1,
+      parts: [],
+      createdAt: t0,
+    });
+    store.set("b", {
+      key: "k",
+      bucket: "b",
+      drimeUid: "ub",
+      drimeKey: "dkb",
+      parentId: 1,
+      parts: [],
+      createdAt: t0,
+    });
     store.set("a", {
       key: "k2",
-      parts: [{ size: 1, md5: "x", etag: "y" }],
+      bucket: "b",
+      drimeUid: "ua",
+      drimeKey: "dka",
+      parentId: 1,
+      parts: [{ partNumber: 1, size: 1, md5: "x", etag: "y" }],
       createdAt: t0,
     });
     expect(store.get("a")?.key).toBe("k2");

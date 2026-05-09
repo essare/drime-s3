@@ -2,6 +2,8 @@
  * Minimal in-memory Drime API for integration tests (plan Task 10).
  */
 
+import { createHash } from "node:crypto";
+
 type EntryType = "folder" | "text";
 
 type Entry = {
@@ -128,6 +130,13 @@ export async function startMockDrime(
   const entries: Entry[] = [];
   const fileBytes = new Map<number, Uint8Array>();
 
+  type MultipartState = {
+    drimeKey: string;
+    parts: Map<number, Uint8Array>;
+  };
+  const multipartByUploadId = new Map<string, MultipartState>();
+  const mergedByDrimeKey = new Map<string, Uint8Array>();
+
   for (const name of options.seedRootFolders ?? []) {
     entries.push({
       id: nextId++,
@@ -146,11 +155,23 @@ export async function startMockDrime(
       const url = new URL(req.url);
       const path = url.pathname;
 
-      if (req.method === "PUT" && path === "/mock-part") {
-        return new Response("", {
-          status: 200,
-          headers: { ETag: '"mock-part-etag"' },
-        });
+      const putPartMatch = /^\/mock-multipart-put\/([^/]+)\/(\d+)$/.exec(path);
+      if (req.method === "PUT" && putPartMatch) {
+        return (async () => {
+          const uploadId = putPartMatch[1] ?? "";
+          const partNum = Number(putPartMatch[2]);
+          const state = multipartByUploadId.get(uploadId);
+          if (!state || !Number.isFinite(partNum)) {
+            return new Response("Not Found", { status: 404 });
+          }
+          const buf = new Uint8Array(await req.arrayBuffer());
+          state.parts.set(partNum, buf);
+          const md5 = createHash("md5").update(buf).digest("hex");
+          return new Response("", {
+            status: 200,
+            headers: { ETag: `"${md5}"` },
+          });
+        })();
       }
 
       if (req.method === "GET" && path === "/me/workspaces") {
@@ -315,23 +336,139 @@ export async function startMockDrime(
       }
 
       if (req.method === "POST" && path === "/s3/multipart/create") {
-        return json({ uploadId: "drime-mock-upload", key: "mock-key" });
+        return (async () => {
+          await req.arrayBuffer().catch(() => undefined);
+          const uid = `mu-${nextId++}`;
+          const dk = `dk-${uid}`;
+          multipartByUploadId.set(uid, { drimeKey: dk, parts: new Map() });
+          return json({ uploadId: uid, key: dk });
+        })();
       }
 
       if (
         req.method === "POST" &&
         path === "/s3/multipart/batch-sign-part-urls"
       ) {
-        const partUrl = `${url.origin}/mock-part`;
-        return json({ urls: [{ url: partUrl, partNumber: 1 }] });
+        return (async () => {
+          const body = (await req.json()) as {
+            uploadId?: string;
+            partNumbers?: number[];
+          };
+          const uploadId = body.uploadId;
+          const nums = body.partNumbers ?? [1];
+          if (typeof uploadId !== "string") {
+            return json({ error: "missing uploadId" }, 400);
+          }
+          const urls = nums.map((pn) => ({
+            url: `${url.origin}/mock-multipart-put/${uploadId}/${pn}`,
+            partNumber: pn,
+          }));
+          return json({ urls });
+        })();
       }
 
       if (req.method === "POST" && path === "/s3/multipart/complete") {
-        return json({ status: "complete" });
+        return (async () => {
+          const body = (await req.json()) as {
+            key?: string;
+            uploadId?: string;
+            parts?: { PartNumber?: number; partNumber?: number }[];
+          };
+          const uid = body.uploadId;
+          const dk = body.key;
+          if (typeof uid !== "string" || typeof dk !== "string") {
+            return json({ error: "bad request" }, 400);
+          }
+          const state = multipartByUploadId.get(uid);
+          if (!state) {
+            return json({ error: "unknown upload" }, 400);
+          }
+          const partList = body.parts ?? [];
+          const buffers: Uint8Array[] = [];
+          for (const p of partList) {
+            const n =
+              typeof p.PartNumber === "number"
+                ? p.PartNumber
+                : typeof p.partNumber === "number"
+                  ? p.partNumber
+                  : NaN;
+            if (!Number.isFinite(n)) continue;
+            const b = state.parts.get(n);
+            if (b) buffers.push(b);
+          }
+          const merged =
+            buffers.length === 0
+              ? new Uint8Array(0)
+              : new Uint8Array(
+                  Buffer.concat(buffers.map((x) => Buffer.from(x))),
+                );
+          mergedByDrimeKey.set(dk, merged);
+          multipartByUploadId.delete(uid);
+          return json({ status: "complete" });
+        })();
       }
 
       if (req.method === "POST" && path === "/s3/multipart/abort") {
-        return json({ status: "aborted" });
+        return (async () => {
+          const body = (await req.json()) as { uploadId?: string };
+          if (typeof body.uploadId === "string") {
+            multipartByUploadId.delete(body.uploadId);
+          }
+          return json({ status: "aborted" });
+        })();
+      }
+
+      if (req.method === "POST" && path === "/s3/entries") {
+        return (async () => {
+          const body = (await req.json()) as {
+            filename?: string;
+            clientName?: string;
+            relativePath?: string;
+            workspaceId?: number;
+            parentId?: number;
+          };
+          const fn = typeof body.filename === "string" ? body.filename : "";
+          let bytes = mergedByDrimeKey.get(fn);
+          if (bytes === undefined) {
+            for (const [k, v] of mergedByDrimeKey) {
+              if (k.endsWith(`/${fn}`) || k === fn) {
+                bytes = v;
+                mergedByDrimeKey.delete(k);
+                break;
+              }
+            }
+          } else {
+            mergedByDrimeKey.delete(fn);
+          }
+          if (bytes === undefined) {
+            return json({ error: "no merged multipart payload" }, 400);
+          }
+          const name =
+            typeof body.clientName === "string" && body.clientName.length > 0
+              ? body.clientName
+              : (body.relativePath?.split("/").pop() ?? fn);
+          const id = nextId++;
+          const ws =
+            typeof body.workspaceId === "number"
+              ? body.workspaceId
+              : workspaceId;
+          const parentId =
+            typeof body.parentId === "number" && Number.isFinite(body.parentId)
+              ? body.parentId
+              : null;
+          const row: Entry = {
+            id,
+            name,
+            type: "text",
+            parent_id: parentId,
+            workspaceId: ws,
+            file_size: bytes.length,
+            updated_at: "2025-01-02T00:00:00.000Z",
+          };
+          entries.push(row);
+          fileBytes.set(id, bytes);
+          return json({ fileEntry: entryToJson(row, url.origin) });
+        })();
       }
 
       return new Response("not found", { status: 404 });

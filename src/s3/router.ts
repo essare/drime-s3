@@ -4,6 +4,7 @@ import { verifySignatureV4 } from "../auth/sigv4";
 import type { AppContext } from "../server-context";
 import { s3ErrorXml } from "./errors";
 import { handleBucketOnly } from "./handlers/bucket";
+import { handleMultipartRequest } from "./handlers/multipart";
 import { handleObjectRequest } from "./handlers/object";
 import { handleListBuckets } from "./handlers/service";
 import { normalizeS3Key } from "./naming";
@@ -210,16 +211,15 @@ export async function dispatch(
 
     const q = url.searchParams;
     if (q.has("uploads") || q.get("uploadId")) {
-      return new Response(
-        s3ErrorXml(
-          "NotImplemented",
-          "Multipart object operations are not implemented yet.",
-        ),
-        withAmzHeaders(rid, {
-          status: 501,
-          headers: { "Content-Type": "application/xml" },
-        }),
-      );
+      const mpRes = await handleMultipartRequest(ctx, {
+        method,
+        bucket,
+        key,
+        url,
+        req,
+        workspaceId: W,
+      });
+      return withRequestId(mpRes, rid);
     }
 
     return new Response(

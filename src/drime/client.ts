@@ -20,7 +20,11 @@ export class DrimeApiError extends Error {
     public readonly status: number,
     public readonly body: string,
   ) {
-    super(`Drime API error ${status}`);
+    const preview =
+      body.trim().length > 0
+        ? `: ${body.trim().replace(/\s+/g, " ").slice(0, 800)}`
+        : "";
+    super(`Drime API error ${status}${preview}`);
     this.name = "DrimeApiError";
   }
 }
@@ -40,7 +44,11 @@ function joinUrl(base: string, path: string): string {
 }
 
 function isNoRetryUpload(method: string, path: string): boolean {
-  return method.toUpperCase() === "POST" && path.endsWith("/uploads");
+  const m = method.toUpperCase();
+  if (m === "POST" && path.endsWith("/uploads")) return true;
+  /** Do not retry: repeated complete can confuse Drime / storage. */
+  if (m === "POST" && path === "/s3/multipart/complete") return true;
+  return false;
 }
 
 /** Compatible with `typeof fetch` / `globalThis.fetch` for injection in tests. */
@@ -80,6 +88,9 @@ export class DrimeClient {
 
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${this.apiKey}`);
+    if (!headers.has("Accept")) {
+      headers.set("Accept", "application/json");
+    }
 
     const { method: _ignored, ...restInit } = init ?? {};
     let lastNetworkError: unknown;
@@ -246,6 +257,105 @@ export class DrimeClient {
       body: JSON.stringify({ entryIds: ids, deleteForever: true }),
     });
     return res.json();
+  }
+
+  /** `POST /s3/multipart/create` — returns Drime upload id + internal object key. */
+  async s3MultipartCreate(
+    body: Record<string, unknown>,
+  ): Promise<{ uploadId: string; key: string }> {
+    const res = await this.request("POST", "/s3/multipart/create", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = (await res.json()) as Record<string, unknown>;
+    const uploadId = j.uploadId;
+    const key = j.key;
+    if (typeof uploadId !== "string" || typeof key !== "string") {
+      throw new DrimeApiError(
+        500,
+        "Invalid multipart create response (missing uploadId or key).",
+      );
+    }
+    return { uploadId, key };
+  }
+
+  /** `POST /s3/multipart/batch-sign-part-urls` — presigned PUT URLs per part number. */
+  async s3BatchSignPartUrls(body: {
+    key: string;
+    uploadId: string;
+    partNumbers: number[];
+  }): Promise<{ url: string; partNumber: number }[]> {
+    const res = await this.request(
+      "POST",
+      "/s3/multipart/batch-sign-part-urls",
+      {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    const j = (await res.json()) as { urls?: unknown };
+    const raw = j.urls;
+    if (!Array.isArray(raw)) return [];
+    const out: { url: string; partNumber: number }[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const url = o.url;
+      const partNumber = o.partNumber ?? o.part_number;
+      if (typeof url !== "string") continue;
+      const pn =
+        typeof partNumber === "number"
+          ? partNumber
+          : typeof partNumber === "string"
+            ? Number.parseInt(partNumber, 10)
+            : NaN;
+      if (!Number.isFinite(pn)) continue;
+      out.push({ url, partNumber: pn });
+    }
+    return out;
+  }
+
+  async s3MultipartComplete(body: unknown): Promise<unknown> {
+    const res = await this.request("POST", "/s3/multipart/complete", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  async s3MultipartAbort(body: {
+    key: string;
+    uploadId: string;
+  }): Promise<unknown> {
+    const res = await this.request("POST", "/s3/multipart/abort", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  /** `POST /s3/entries` — register completed multipart object in Drive (after `/s3/multipart/complete`). */
+  async s3CreateEntry(body: Record<string, unknown>): Promise<unknown> {
+    const res = await this.request("POST", "/s3/entries", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  /**
+   * PUT to an absolute presigned URL (no `Authorization` header).
+   * Used for multipart part uploads to Drime-backed storage.
+   */
+  async putUnsignedUrl(
+    absoluteUrl: string,
+    init: { body: BodyInit | null; headers?: HeadersInit },
+  ): Promise<Response> {
+    return this.fetchFn(absoluteUrl, {
+      method: "PUT",
+      body: init.body,
+      headers: init.headers,
+    });
   }
 
   /** `GET /me/workspaces` — bearer token same as other Drime calls. */

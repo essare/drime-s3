@@ -73,6 +73,8 @@ Example (local dev against real Drime):
   bun run src/cli/main.ts serve
   # other terminal:
   DRIME_S3_INSECURE=1 bun run scripts/real-upload-smoke.ts http://127.0.0.1:8081
+  # large multipart (AWS CLI): place scripts/bin/payload.bin, then:
+  DRIME_S3_ENDPOINT=http://127.0.0.1:8081 bun run scripts/real-large-s3-upload.ts
 `);
 }
 
