@@ -4,7 +4,9 @@ import { verifySignatureV4 } from "../auth/sigv4";
 import type { AppContext } from "../server-context";
 import { s3ErrorXml } from "./errors";
 import { handleBucketOnly } from "./handlers/bucket";
+import { handleObjectRequest } from "./handlers/object";
 import { handleListBuckets } from "./handlers/service";
+import { normalizeS3Key } from "./naming";
 
 function normalizePathname(url: URL): string {
   const p = url.pathname || "/";
@@ -190,10 +192,39 @@ export async function dispatch(
       );
     }
 
+    const key = normalizeS3Key(
+      rest.map((s) => decodeURIComponent(s)).join("/"),
+    );
+    const objectRes = await handleObjectRequest(ctx, {
+      method,
+      bucket,
+      key,
+      url,
+      req,
+      workspaceId: W,
+    });
+    if (objectRes !== null) {
+      return withRequestId(objectRes, rid);
+    }
+
+    const q = url.searchParams;
+    if (q.has("uploads") || q.get("uploadId")) {
+      return new Response(
+        s3ErrorXml(
+          "NotImplemented",
+          "Multipart object operations are not implemented yet.",
+        ),
+        withAmzHeaders(rid, {
+          status: 501,
+          headers: { "Content-Type": "application/xml" },
+        }),
+      );
+    }
+
     return new Response(
       s3ErrorXml(
         "NotImplemented",
-        "Object operations are not implemented yet.",
+        "This object operation is not implemented yet.",
       ),
       withAmzHeaders(rid, {
         status: 501,

@@ -12,6 +12,8 @@ type Entry = {
   workspaceId: number;
   file_size: number;
   updated_at: string;
+  hash?: string | null;
+  description?: string | null;
 };
 
 export type StartMockDrimeOptions = {
@@ -28,19 +30,85 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function entryToJson(e: Entry): Record<string, unknown> {
-  return {
+function entryToJson(e: Entry, origin: string): Record<string, unknown> {
+  const base: Record<string, unknown> = {
     id: e.id,
     name: e.name,
     type: e.type,
     parent_id: e.parent_id,
     file_size: e.file_size,
     updated_at: e.updated_at,
-    hash: null,
+    hash: e.hash ?? null,
     mime: e.type === "folder" ? null : "application/octet-stream",
-    description: null,
-    url: null,
+    description: e.description ?? null,
+    url: e.type === "text" ? `${origin}/file-entries/${e.id}/download` : null,
   };
+  return base;
+}
+
+/** Partial GET for integration tests (Range: bytes=…). */
+function downloadResponse(
+  req: Request,
+  bytes: Uint8Array,
+  mime = "application/octet-stream",
+): Response {
+  const total = bytes.length;
+  const range = req.headers.get("range");
+  if (range === null || !range.startsWith("bytes=")) {
+    return new Response(Buffer.from(bytes), {
+      status: 200,
+      headers: {
+        "Content-Type": mime,
+        "Content-Length": String(total),
+        "Accept-Ranges": "bytes",
+      },
+    });
+  }
+  const spec = range.slice("bytes=".length).trim();
+  let start = 0;
+  let end = total - 1;
+  if (spec.startsWith("-")) {
+    const suffix = Number.parseInt(spec.slice(1), 10);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      return new Response("Invalid Range", { status: 416 });
+    }
+    start = Math.max(0, total - suffix);
+    end = total - 1;
+  } else if (spec.endsWith("-")) {
+    start = Number.parseInt(spec.slice(0, -1), 10);
+    if (!Number.isFinite(start) || start < 0 || start >= total) {
+      return new Response("Invalid Range", { status: 416 });
+    }
+    end = total - 1;
+  } else {
+    const dash = spec.indexOf("-");
+    if (dash < 0) {
+      return new Response("Invalid Range", { status: 416 });
+    }
+    start = Number.parseInt(spec.slice(0, dash), 10);
+    const endPart = spec.slice(dash + 1);
+    end = endPart === "" ? total - 1 : Number.parseInt(endPart, 10);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end < start ||
+      start >= total
+    ) {
+      return new Response("Invalid Range", { status: 416 });
+    }
+    end = Math.min(end, total - 1);
+  }
+  const slice = bytes.subarray(start, end + 1);
+  return new Response(Buffer.from(slice), {
+    status: 206,
+    headers: {
+      "Content-Type": mime,
+      "Content-Length": String(slice.length),
+      "Content-Range": `bytes ${start}-${end}/${total}`,
+      "Accept-Ranges": "bytes",
+    },
+  });
 }
 
 export type MockDrimeServer = {
@@ -58,6 +126,7 @@ export async function startMockDrime(
   const workspaces = [{ id: workspaceId, name: "drime-s3" }];
   let nextId = 100;
   const entries: Entry[] = [];
+  const fileBytes = new Map<number, Uint8Array>();
 
   for (const name of options.seedRootFolders ?? []) {
     entries.push({
@@ -114,7 +183,9 @@ export async function startMockDrime(
         const total = rows.length;
         const lastPage = Math.max(1, Math.ceil(total / perPage));
         const start = (page - 1) * perPage;
-        const data = rows.slice(start, start + perPage).map(entryToJson);
+        const data = rows
+          .slice(start, start + perPage)
+          .map((e) => entryToJson(e, url.origin));
         return json({ data, last_page: lastPage });
       }
 
@@ -163,6 +234,7 @@ export async function startMockDrime(
           let parentId: number | null = null;
           let ws = workspaceId;
           let relativePath = "uploaded";
+          let payload = new Uint8Array(0);
           if (ct.includes("multipart/form-data")) {
             const fd = await req.formData();
             const pid = fd.get("parentId");
@@ -177,6 +249,10 @@ export async function startMockDrime(
             if (typeof rp === "string" && rp.length > 0) {
               relativePath = rp;
             }
+            const fileField = fd.get("file");
+            if (fileField instanceof Blob) {
+              payload = new Uint8Array(await fileField.arrayBuffer());
+            }
           }
           const id = nextId++;
           const name = relativePath.includes("/")
@@ -188,11 +264,38 @@ export async function startMockDrime(
             type: "text",
             parent_id: parentId,
             workspaceId: ws,
-            file_size: 1,
+            file_size: payload.length,
             updated_at: "2024-07-01T10:00:00.000Z",
           };
           entries.push(row);
-          return json({ fileEntry: entryToJson(row) });
+          fileBytes.set(id, payload);
+          return json({ fileEntry: entryToJson(row, url.origin) });
+        })();
+      }
+
+      const downloadMatch = /^\/file-entries\/(\d+)\/download$/.exec(path);
+      if (req.method === "GET" && downloadMatch) {
+        const id = Number(downloadMatch[1]);
+        const bytes = fileBytes.get(id);
+        if (bytes === undefined) {
+          return new Response("Not Found", { status: 404 });
+        }
+        return downloadResponse(req, bytes);
+      }
+
+      const entryPutMatch = /^\/file-entries\/(\d+)$/.exec(path);
+      if (req.method === "PUT" && entryPutMatch) {
+        return (async () => {
+          const id = Number(entryPutMatch[1]);
+          const row = entries.find((e) => e.id === id);
+          if (row === undefined) {
+            return new Response("Not Found", { status: 404 });
+          }
+          const body = (await req.json()) as { description?: string };
+          if (typeof body.description === "string") {
+            row.description = body.description;
+          }
+          return json({ fileEntry: entryToJson(row, url.origin) });
         })();
       }
 
@@ -203,6 +306,7 @@ export async function startMockDrime(
           for (let i = entries.length - 1; i >= 0; i--) {
             const row = entries[i];
             if (row !== undefined && ids.has(row.id)) {
+              fileBytes.delete(row.id);
               entries.splice(i, 1);
             }
           }

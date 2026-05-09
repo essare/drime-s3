@@ -17,7 +17,7 @@ function xmlErr(status: number, code: string, message: string): Response {
   });
 }
 
-async function findRootFolder(
+export async function findRootFolder(
   ctx: AppContext,
   workspaceId: number,
   bucket: string,
@@ -29,7 +29,7 @@ async function findRootFolder(
   return entries.find((e) => e.is_folder && e.name.toLowerCase() === lower);
 }
 
-function parseCreateFolderResponse(raw: unknown): number | undefined {
+export function parseCreateFolderResponse(raw: unknown): number | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;
   const folder = o.folder;

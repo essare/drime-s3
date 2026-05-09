@@ -209,6 +209,33 @@ export class DrimeClient {
     return res.json();
   }
 
+  getDownloadUrl(entryId: number): string {
+    return joinUrl(this.apiBaseUrl, `/file-entries/${entryId}/download`);
+  }
+
+  /**
+   * Optional metadata update (e.g. `description: "md5:…"` for S3 ETag parity) when Drime supports `PUT /file-entries/:id`.
+   */
+  async updateFileEntryDescription(
+    entryId: number,
+    description: string,
+  ): Promise<void> {
+    await this.request("PUT", `/file-entries/${entryId}`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description }),
+    });
+  }
+
+  /** Authenticated `fetch` to an absolute URL (e.g. file download). */
+  async fetchAuthenticated(
+    absoluteUrl: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${this.apiKey}`);
+    return this.fetchFn(absoluteUrl, { ...init, headers });
+  }
+
   async deleteEntriesForever(ids: number[]): Promise<unknown> {
     const res = await this.request("POST", "/file-entries/delete", {
       headers: { "Content-Type": "application/json" },
