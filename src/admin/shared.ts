@@ -1,4 +1,5 @@
 import { normalizePathKey } from "../cache/folder-paths";
+import { jsonError } from "./errors";
 import type { AppContext } from "../server-context";
 import { findRootFolder, parseCreateFolderResponse } from "../s3/handlers/bucket";
 import { handleObjectRequest } from "../s3/handlers/object";
@@ -157,4 +158,42 @@ async function translateS3XmlError(res: Response): Promise<PutObjectResult> {
   if (code === "NoSuchBucket") return { kind: "no-such-bucket" };
   if (res.status >= 400 && res.status < 500) return { kind: "invalid", message };
   return { kind: "error", status: res.status, code, message };
+}
+
+export async function adminGetObject(
+  ctx: AppContext,
+  W: number,
+  bucket: string,
+  key: string,
+  range: string | null,
+): Promise<Response> {
+  const folder = await findRootFolder(ctx, W, bucket);
+  if (folder === undefined) {
+    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+  }
+
+  const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
+  const headers = new Headers();
+  if (range) headers.set("range", range);
+
+  const synthReq = new Request(u, { method: "GET", headers });
+  const res = await handleObjectRequest(ctx, {
+    method: "GET", bucket, key, url: u, req: synthReq, workspaceId: W,
+  });
+  if (res === null) {
+    return jsonError("InternalError", "Object handler returned null.", 500);
+  }
+  if (res.status === 200 || res.status === 206) {
+    const out = new Headers();
+    for (const k of ["content-type", "content-length", "content-range", "etag", "last-modified", "accept-ranges"]) {
+      const v = res.headers.get(k);
+      if (v) out.set(k, v);
+    }
+    out.set("Cache-Control", "no-store");
+    return new Response(res.body, { status: res.status, headers: out });
+  }
+  const text = await res.text();
+  const codeMatch = /<Code>([^<]+)<\/Code>/.exec(text);
+  const msgMatch = /<Message>([^<]*)<\/Message>/.exec(text);
+  return jsonError(codeMatch?.[1] ?? "InternalError", msgMatch?.[1] ?? "Download failed.", res.status);
 }

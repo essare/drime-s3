@@ -1,6 +1,6 @@
 import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import { adminListObjects, adminPutObject } from "../shared";
+import { adminGetObject, adminListObjects, adminPutObject } from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(
@@ -65,4 +65,17 @@ export async function handlePutObjectAdmin(
     return jsonError(r.code, r.message, r.status);
   }
   return jsonOk({ etag: r.etag, size: r.size });
+}
+
+export async function handleGetObjectAdmin(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+  req: Request,
+): Promise<Response> {
+  if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
+  return adminGetObject(
+    ctx, ctx.gatewayWorkspaceId, bucket, key,
+    req.headers.get("range"),
+  );
 }
