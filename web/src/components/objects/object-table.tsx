@@ -113,16 +113,6 @@ export function ObjectTable({
           ? "indeterminate"
           : false;
 
-  function toggleHeader(checked: boolean) {
-    const next = new Set(selected);
-    if (checked) {
-      for (const k of objectKeysOnPage) next.add(k);
-    } else {
-      for (const k of objectKeysOnPage) next.delete(k);
-    }
-    onSelectChange(next);
-  }
-
   function toggleRowKey(key: string, checked: boolean) {
     const next = new Set(selected);
     if (checked) next.add(key);
@@ -162,7 +152,15 @@ export function ObjectTable({
                   aria-label="Select all objects on this page"
                   checked={headerChecked}
                   disabled={objectKeysOnPage.length === 0}
-                  onCheckedChange={(value) => toggleHeader(value === true)}
+                  onCheckedChange={(value) => {
+                    const next = new Set(selected);
+                    if (value === false) {
+                      for (const k of objectKeysOnPage) next.delete(k);
+                    } else {
+                      for (const k of objectKeysOnPage) next.add(k);
+                    }
+                    onSelectChange(next);
+                  }}
                 />
               </TableHead>
               <TableHead>

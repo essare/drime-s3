@@ -1,5 +1,9 @@
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+
 import { ObjectsBreadcrumbs } from "@/components/objects/breadcrumbs";
+import { BulkDeleteToolbar } from "@/components/objects/bulk-delete-toolbar";
 import { ObjectTable } from "@/components/objects/object-table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -39,6 +43,20 @@ export default function BucketDetailPage() {
   const prefix = searchParams.get("prefix") ?? "";
   const bucket = bucketParam ?? "";
 
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  const onSelectChange = useCallback((next: Set<string>) => {
+    if (next.size > 1000) {
+      toast.error("Select at most 1000 keys");
+      return;
+    }
+    setSelected(next);
+  }, []);
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [bucket, prefix]);
+
   const setPrefix = (next: string) =>
     setSearchParams(next ? { prefix: next } : {}, { replace: false });
 
@@ -71,6 +89,15 @@ export default function BucketDetailPage() {
         onNavigate={setPrefix}
       />
 
+      {selected.size > 0 ? (
+        <BulkDeleteToolbar
+          bucket={bucket}
+          selected={selected}
+          onClearSelection={() => setSelected(new Set())}
+          onAfterDelete={() => setSelected(new Set())}
+        />
+      ) : null}
+
       {objects.isError ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load objects</AlertTitle>
@@ -91,8 +118,8 @@ export default function BucketDetailPage() {
 
       <ObjectTable
         rows={rows}
-        selected={new Set()}
-        onSelectChange={() => {}}
+        selected={selected}
+        onSelectChange={onSelectChange}
         onNavigatePrefix={setPrefix}
         onLoadMore={() => void objects.fetchNextPage()}
         hasMore={Boolean(objects.hasNextPage)}
