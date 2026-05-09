@@ -1,0 +1,25 @@
+{
+  "name": "drime-s3",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot run src/cli/main.ts serve",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "build": "bun build src/cli/main.ts --outdir=dist --target=bun"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.7.3",
+    "pino": "^10.3.1",
+    "smol-toml": "^1.6.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@types/bun": "^1.3.13",
+    "lefthook": "^2.1.6",
+    "typescript": "^6.0.3"
+  }
+}
