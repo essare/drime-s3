@@ -1,6 +1,11 @@
 import type { AppContext } from "../server-context";
 import { checkOrigin, requireSession } from "./auth";
 import { jsonError } from "./errors";
+import {
+  handleCreateBucketAdmin,
+  handleDeleteBucketAdmin,
+  handleListBucketsAdmin,
+} from "./handlers/buckets";
 import { handleHealth } from "./handlers/health";
 import { handleInit } from "./handlers/init";
 import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
@@ -36,6 +41,13 @@ export async function dispatchAdmin(
 
   if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
   if (method === "POST" && path === "/_admin/init") return handleInit(ctx);
+
+  if (path === "/_admin/buckets" && method === "GET") return handleListBucketsAdmin(ctx);
+  if (path === "/_admin/buckets" && method === "POST") return handleCreateBucketAdmin(ctx, req);
+  const bucketOnly = /^\/_admin\/buckets\/([^/]+)$/.exec(path);
+  if (bucketOnly && method === "DELETE") {
+    return handleDeleteBucketAdmin(ctx, decodeURIComponent(bucketOnly[1] ?? ""));
+  }
 
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);
 }
