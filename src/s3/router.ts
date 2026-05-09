@@ -3,8 +3,8 @@ import { hasPresignedAuth, verifyPresignedUrl } from "../auth/presigned";
 import { verifySignatureV4 } from "../auth/sigv4";
 import type { AppContext } from "../server-context";
 import { s3ErrorXml } from "./errors";
-import { isValidBucketName } from "./naming";
-import { listAllMyBucketsXml } from "./xml";
+import { handleBucketOnly } from "./handlers/bucket";
+import { handleListBuckets } from "./handlers/service";
 
 function normalizePathname(url: URL): string {
   const p = url.pathname || "/";
@@ -30,6 +30,16 @@ function withAmzHeaders(
   const h = new Headers(init.headers);
   h.set("x-amz-request-id", rid);
   return { ...init, headers: h };
+}
+
+function withRequestId(res: Response, rid: string): Response {
+  const h = new Headers(res.headers);
+  h.set("x-amz-request-id", rid);
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: h,
+  });
 }
 
 async function ensureAuth(
@@ -105,7 +115,7 @@ function corsPreflightResponse(rid: string): Response {
 }
 
 /**
- * S3-compatible gateway dispatch (plan Task 11).
+ * S3-compatible gateway dispatch (plan Task 11+).
  */
 export async function dispatch(
   ctx: AppContext,
@@ -152,32 +162,48 @@ export async function dispatch(
   const W = ctx.gatewayWorkspaceId;
 
   if (method === "GET" && pathname === "/") {
-    const entries = await ctx.listCache.getOrFetch(null, () =>
-      ctx.drime.listFolder(null, W),
-    );
-    const buckets = entries
-      .filter((e) => e.is_folder && isValidBucketName(e.name))
-      .map((e) => ({
-        name: e.name,
-        creationDate: e.updated_at ?? new Date(0).toISOString(),
-      }));
-    const xml = listAllMyBucketsXml({
-      ownerId: "drime",
-      ownerDisplayName: "drime",
-      buckets,
-    });
-    return new Response(xml, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/xml",
-        "x-amz-request-id": rid,
-      },
-    });
+    const res = await handleListBuckets(ctx, W);
+    return withRequestId(res, rid);
   }
 
-  if (pathname !== "/" && pathname !== "/_health") {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length >= 1) {
+    const bucket = decodeURIComponent(segments[0] ?? "");
+    const rest = segments.slice(1);
+
+    if (rest.length === 0) {
+      const hit = await handleBucketOnly(ctx, {
+        method,
+        bucket,
+        url,
+        workspaceId: W,
+      });
+      if (hit !== null) {
+        return withRequestId(hit, rid);
+      }
+      if (method === "GET") {
+        return new Response(
+          s3ErrorXml("NotImplemented", "ListObjects is not implemented yet."),
+          withAmzHeaders(rid, {
+            status: 501,
+            headers: { "Content-Type": "application/xml" },
+          }),
+        );
+      }
+      return new Response(
+        s3ErrorXml("NotImplemented", "This operation is not implemented yet."),
+        withAmzHeaders(rid, {
+          status: 501,
+          headers: { "Content-Type": "application/xml" },
+        }),
+      );
+    }
+
     return new Response(
-      s3ErrorXml("NotImplemented", "This operation is not implemented yet."),
+      s3ErrorXml(
+        "NotImplemented",
+        "Object operations are not implemented yet.",
+      ),
       withAmzHeaders(rid, {
         status: 501,
         headers: { "Content-Type": "application/xml" },

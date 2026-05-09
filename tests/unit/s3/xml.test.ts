@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { XMLParser } from "fast-xml-parser";
 import { s3ErrorXml } from "../../../src/s3/errors";
 import {
+  bucketAclStubXml,
+  bucketLocationXml,
+  bucketVersioningXml,
   copyObjectResultXml,
   deleteResultXml,
   listAllMyBucketsXml,
@@ -66,5 +69,21 @@ describe("copyObjectResultXml", () => {
       lastModified: "2023-01-01T00:00:00.000Z",
     });
     expect(xml).toContain("x");
+  });
+});
+
+describe("bucket stub XML", () => {
+  test("location", () => {
+    const xml = bucketLocationXml("eu-west-1");
+    expect(xml).toContain("LocationConstraint");
+    expect(xml).toContain("eu-west-1");
+  });
+
+  test("versioning", () => {
+    expect(bucketVersioningXml()).toContain("Suspended");
+  });
+
+  test("acl", () => {
+    expect(bucketAclStubXml()).toContain("AccessControlPolicy");
   });
 });

@@ -187,3 +187,49 @@ export function copyObjectResultXml(opts: {
   };
   return withDecl(listBuilder.build(obj));
 }
+
+/** GET ?location — GetBucketLocation */
+export function bucketLocationXml(region: string): string {
+  const obj = {
+    LocationConstraint: {
+      ...xmlnsAttrs(),
+      "#text": region,
+    },
+  };
+  return withDecl(listBuilder.build(obj));
+}
+
+/** GET ?versioning — minimal stub (suspended). */
+export function bucketVersioningXml(): string {
+  const obj = {
+    VersioningConfiguration: {
+      ...xmlnsAttrs(),
+      Status: "Suspended",
+    },
+  };
+  return withDecl(listBuilder.build(obj));
+}
+
+/** GET ?acl — minimal stub AccessControlPolicy. */
+export function bucketAclStubXml(): string {
+  const obj = {
+    AccessControlPolicy: {
+      ...xmlnsAttrs(),
+      Owner: {
+        ID: "drime",
+        DisplayName: "drime",
+      },
+      AccessControlList: {
+        Grant: {
+          Grantee: {
+            "@_xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@_xsi:type": "Group",
+            URI: "http://acs.amazonaws.com/groups/global/AllUsers",
+          },
+          Permission: "READ",
+        },
+      },
+    },
+  };
+  return withDecl(listBuilder.build(obj));
+}
