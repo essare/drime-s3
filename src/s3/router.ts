@@ -120,7 +120,8 @@ function corsPreflightResponse(rid: string): Response {
 }
 
 function looksLikeAwsRequest(req: Request, url: URL): boolean {
-  if (req.headers.get("authorization")?.startsWith("AWS4-HMAC-SHA256")) return true;
+  if (req.headers.get("authorization")?.startsWith("AWS4-HMAC-SHA256"))
+    return true;
   return hasPresignedAuth(url);
 }
 

@@ -13,7 +13,9 @@ describe("admin/state", () => {
     expect(out.length).toBe(32);
     // Same input → deterministic output
     const again = await deriveSessionSecret("hunter2-hunter2", "");
-    expect(Buffer.from(out).toString("hex")).toBe(Buffer.from(again).toString("hex"));
+    expect(Buffer.from(out).toString("hex")).toBe(
+      Buffer.from(again).toString("hex"),
+    );
   });
 
   test("deriveSessionSecret throws when both secret and password unset", async () => {
@@ -23,23 +25,34 @@ describe("admin/state", () => {
   test("deriveSessionSecret produces different output for different passwords", async () => {
     const a = await deriveSessionSecret("alpha-password-1", "");
     const b = await deriveSessionSecret("beta-password-2", "");
-    expect(Buffer.from(a).toString("hex")).not.toBe(Buffer.from(b).toString("hex"));
+    expect(Buffer.from(a).toString("hex")).not.toBe(
+      Buffer.from(b).toString("hex"),
+    );
   });
 
   test("createWebUiState is disabled when password set but sessionSecret is empty", () => {
-    const s = createWebUiState({ password: "set", sessionSecret: new Uint8Array(0) });
+    const s = createWebUiState({
+      password: "set",
+      sessionSecret: new Uint8Array(0),
+    });
     expect(s.enabled).toBe(false);
     expect(s.loginAttempts.size).toBe(0);
   });
 
   test("createWebUiState returns disabled state when password unset", () => {
-    const s = createWebUiState({ password: "", sessionSecret: new Uint8Array(0) });
+    const s = createWebUiState({
+      password: "",
+      sessionSecret: new Uint8Array(0),
+    });
     expect(s.enabled).toBe(false);
     expect(s.activeSessions()).toBe(0);
   });
 
   test("createWebUiState exposes activeSessions counter", () => {
-    const s = createWebUiState({ password: "p", sessionSecret: new Uint8Array(32) });
+    const s = createWebUiState({
+      password: "p",
+      sessionSecret: new Uint8Array(32),
+    });
     expect(s.enabled).toBe(true);
     expect(s.activeSessions()).toBe(0);
     s.recordSessionIssued();

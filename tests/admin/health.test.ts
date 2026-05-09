@@ -11,7 +11,11 @@ describe("GET /_admin/health", () => {
         }),
       );
       expect(res.status).toBe(200);
-      const j = (await res.json()) as { ok: boolean; version: string; hasPassword: boolean };
+      const j = (await res.json()) as {
+        ok: boolean;
+        version: string;
+        hasPassword: boolean;
+      };
       expect(j.ok).toBe(true);
       expect(j.hasPassword).toBe(true);
       expect(typeof j.version).toBe("string");
@@ -30,7 +34,9 @@ describe("GET /_admin/health", () => {
         }),
       );
       expect(res.status).toBe(200);
-      expect(((await res.json()) as { hasPassword: boolean }).hasPassword).toBe(false);
+      expect(((await res.json()) as { hasPassword: boolean }).hasPassword).toBe(
+        false,
+      );
     } finally {
       setup.cleanup();
     }

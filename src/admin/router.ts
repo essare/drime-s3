@@ -6,6 +6,8 @@ import {
   handleDeleteBucketAdmin,
   handleListBucketsAdmin,
 } from "./handlers/buckets";
+import { handleHealth } from "./handlers/health";
+import { handleInit } from "./handlers/init";
 import {
   handleBatchDeleteAdmin,
   handleDeleteObjectAdmin,
@@ -13,9 +15,11 @@ import {
   handleListObjectsAdmin,
   handlePutObjectAdmin,
 } from "./handlers/objects";
-import { handleHealth } from "./handlers/health";
-import { handleInit } from "./handlers/init";
-import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
+import {
+  handleGetSession,
+  handleLogin,
+  handleLogout,
+} from "./handlers/session";
 import { handleStatus } from "./handlers/status";
 
 export async function dispatchAdmin(
@@ -39,9 +43,12 @@ export async function dispatchAdmin(
   const originErr = checkOrigin(req);
   if (originErr) return originErr;
 
-  if (method === "POST" && path === "/_admin/login") return handleLogin(ctx, req, url);
-  if (method === "POST" && path === "/_admin/logout") return handleLogout(ctx, req, url);
-  if (method === "GET" && path === "/_admin/session") return handleGetSession(ctx, req);
+  if (method === "POST" && path === "/_admin/login")
+    return handleLogin(ctx, req, url);
+  if (method === "POST" && path === "/_admin/logout")
+    return handleLogout(ctx, req, url);
+  if (method === "GET" && path === "/_admin/session")
+    return handleGetSession(ctx, req);
 
   const sessionErr = await requireSession(ctx, req);
   if (sessionErr) return sessionErr;
@@ -49,41 +56,65 @@ export async function dispatchAdmin(
   if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
   if (method === "POST" && path === "/_admin/init") return handleInit(ctx);
 
-  if (path === "/_admin/buckets" && method === "GET") return handleListBucketsAdmin(ctx);
-  if (path === "/_admin/buckets" && method === "POST") return handleCreateBucketAdmin(ctx, req);
+  if (path === "/_admin/buckets" && method === "GET")
+    return handleListBucketsAdmin(ctx);
+  if (path === "/_admin/buckets" && method === "POST")
+    return handleCreateBucketAdmin(ctx, req);
   const bucketOnly = /^\/_admin\/buckets\/([^/]+)$/.exec(path);
   if (bucketOnly && method === "DELETE") {
-    return handleDeleteBucketAdmin(ctx, decodeURIComponent(bucketOnly[1] ?? ""));
+    return handleDeleteBucketAdmin(
+      ctx,
+      decodeURIComponent(bucketOnly[1] ?? ""),
+    );
   }
 
   const objectsList = /^\/_admin\/buckets\/([^/]+)\/objects$/.exec(path);
   if (objectsList && method === "GET") {
-    return handleListObjectsAdmin(ctx, decodeURIComponent(objectsList[1] ?? ""), url);
+    return handleListObjectsAdmin(
+      ctx,
+      decodeURIComponent(objectsList[1] ?? ""),
+      url,
+    );
   }
 
   const objectMatch = /^\/_admin\/buckets\/([^/]+)\/objects\/(.+)$/.exec(path);
   if (objectMatch && method === "PUT") {
     const bucket = decodeURIComponent(objectMatch[1] ?? "");
     const keyEnc = objectMatch[2] ?? "";
-    const key = keyEnc.split("/").map((p) => decodeURIComponent(p)).join("/");
+    const key = keyEnc
+      .split("/")
+      .map((p) => decodeURIComponent(p))
+      .join("/");
     return handlePutObjectAdmin(ctx, bucket, key, req);
   }
   if (objectMatch && method === "GET") {
     const bucket = decodeURIComponent(objectMatch[1] ?? "");
     const keyEnc = objectMatch[2] ?? "";
-    const key = keyEnc.split("/").map((p) => decodeURIComponent(p)).join("/");
+    const key = keyEnc
+      .split("/")
+      .map((p) => decodeURIComponent(p))
+      .join("/");
     return handleGetObjectAdmin(ctx, bucket, key, req);
   }
   if (objectMatch && method === "DELETE") {
     const bucket = decodeURIComponent(objectMatch[1] ?? "");
     const keyEnc = objectMatch[2] ?? "";
-    const key = keyEnc.split("/").map((p) => decodeURIComponent(p)).join("/");
+    const key = keyEnc
+      .split("/")
+      .map((p) => decodeURIComponent(p))
+      .join("/");
     return handleDeleteObjectAdmin(ctx, bucket, key);
   }
 
-  const batchDelete = /^\/_admin\/buckets\/([^/]+)\/objects:batchDelete$/.exec(path);
+  const batchDelete = /^\/_admin\/buckets\/([^/]+)\/objects:batchDelete$/.exec(
+    path,
+  );
   if (batchDelete && method === "POST") {
-    return handleBatchDeleteAdmin(ctx, decodeURIComponent(batchDelete[1] ?? ""), req);
+    return handleBatchDeleteAdmin(
+      ctx,
+      decodeURIComponent(batchDelete[1] ?? ""),
+      req,
+    );
   }
 
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);

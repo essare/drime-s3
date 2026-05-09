@@ -47,7 +47,9 @@ describe("GET /_admin/status", () => {
         }),
       );
       expect(res.status).toBe(200);
-      const j = (await res.json()) as { workspace: { exists: boolean; id: number | null } };
+      const j = (await res.json()) as {
+        workspace: { exists: boolean; id: number | null };
+      };
       expect(j.workspace.exists).toBe(false);
       expect(j.workspace.id).toBeNull();
     } finally {

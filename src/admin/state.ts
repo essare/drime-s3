@@ -27,7 +27,10 @@ export async function deriveSessionSecret(
   sessionSecretHex: string,
 ): Promise<Uint8Array> {
   if (sessionSecretHex.length > 0) {
-    if (sessionSecretHex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(sessionSecretHex)) {
+    if (
+      sessionSecretHex.length % 2 !== 0 ||
+      !/^[0-9a-fA-F]+$/.test(sessionSecretHex)
+    ) {
       throw new Error(
         "Invalid session secret: expected even-length hex string",
       );

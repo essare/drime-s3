@@ -20,10 +20,15 @@ describe("/_admin/buckets", () => {
     try {
       const cookie = await loginCookie(setup, "hunter2-hunter2");
       const res = await setup.call(
-        new Request(`${ORIG}/_admin/buckets`, { headers: authedHeaders(cookie) }),
+        new Request(`${ORIG}/_admin/buckets`, {
+          headers: authedHeaders(cookie),
+        }),
       );
       expect(res.status).toBe(200);
-      const j = (await res.json()) as { buckets: { name: string; createdAt: string }[]; count: number };
+      const j = (await res.json()) as {
+        buckets: { name: string; createdAt: string }[];
+        count: number;
+      };
       expect(j.count).toBe(2);
       expect(j.buckets.map((b) => b.name).sort()).toEqual(["alpha", "beta"]);
       for (const b of j.buckets) expect(typeof b.createdAt).toBe("string");
@@ -72,7 +77,9 @@ describe("/_admin/buckets", () => {
         }),
       );
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("InvalidBucketName");
+      expect(
+        ((await res.json()) as { error: { code: string } }).error.code,
+      ).toBe("InvalidBucketName");
     } finally {
       setup.cleanup();
     }

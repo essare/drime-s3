@@ -21,7 +21,8 @@ describe("DELETE /_admin/buckets/:b/objects/*key", () => {
       );
       const del = await setup.call(
         new Request(`${ORIG}/_admin/buckets/docs/objects/x.txt`, {
-          method: "DELETE", headers,
+          method: "DELETE",
+          headers,
         }),
       );
       expect(del.status).toBe(204);

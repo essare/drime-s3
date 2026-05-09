@@ -8,7 +8,9 @@ describe("admin/errors", () => {
     expect(r.headers.get("Content-Type")).toBe("application/json");
     expect(r.headers.get("Cache-Control")).toBe("no-store");
     const j = await r.json();
-    expect(j).toEqual({ error: { code: "Unauthorized", message: "bad password" } });
+    expect(j).toEqual({
+      error: { code: "Unauthorized", message: "bad password" },
+    });
   });
 
   test("jsonError includes details when provided", async () => {
@@ -17,11 +19,17 @@ describe("admin/errors", () => {
   });
 
   test("jsonError merges extraHeaders but always enforces Content-Type and Cache-Control", async () => {
-    const r = jsonError("RateLimited", "slow down", 429, { retryAfter: 30 }, {
-      "Retry-After": "30",
-      "Content-Type": "text/plain",
-      "Cache-Control": "max-age=3600",
-    });
+    const r = jsonError(
+      "RateLimited",
+      "slow down",
+      429,
+      { retryAfter: 30 },
+      {
+        "Retry-After": "30",
+        "Content-Type": "text/plain",
+        "Cache-Control": "max-age=3600",
+      },
+    );
     expect(r.headers.get("Retry-After")).toBe("30");
     expect(r.headers.get("Content-Type")).toBe("application/json");
     expect(r.headers.get("Cache-Control")).toBe("no-store");
@@ -40,10 +48,18 @@ describe("admin/errors", () => {
   });
 
   test("jsonStream attaches no-store and given content-type", async () => {
-    const r = jsonStream(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1,2])); c.close(); } }), {
-      contentType: "application/octet-stream",
-      contentLength: 2,
-    });
+    const r = jsonStream(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array([1, 2]));
+          c.close();
+        },
+      }),
+      {
+        contentType: "application/octet-stream",
+        contentLength: 2,
+      },
+    );
     expect(r.headers.get("Cache-Control")).toBe("no-store");
     expect(r.headers.get("Content-Type")).toBe("application/octet-stream");
     expect(r.headers.get("Content-Length")).toBe("2");
@@ -58,7 +74,9 @@ describe("admin/errors", () => {
     });
     expect(r.headers.get("Content-Length")).toBeNull();
     expect(r.headers.get("Content-Type")).toBe("text/plain");
-    expect(r.headers.get("Content-Disposition")).toBe('attachment; filename="x"');
+    expect(r.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="x"',
+    );
     expect(r.headers.get("Cache-Control")).toBe("no-store");
   });
 });

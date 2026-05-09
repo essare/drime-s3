@@ -79,6 +79,7 @@ export async function requireSession(
   const raw = parseCookieHeader(req.headers.get("cookie"), "drime_admin");
   if (!raw) return jsonError("Unauthorized", "Login required.", 401);
   const v = await verifySessionToken(raw, ctx.webUi.sessionSecret, Date.now());
-  if (!v.ok) return jsonError("Unauthorized", "Session invalid or expired.", 401);
+  if (!v.ok)
+    return jsonError("Unauthorized", "Session invalid or expired.", 401);
   return null;
 }

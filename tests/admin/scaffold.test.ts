@@ -3,13 +3,18 @@ import pino from "pino";
 import { dispatchAdmin } from "../../src/admin/router";
 import type { AppContext } from "../../src/server-context";
 import { createAppContext } from "../../src/server-context";
-import { adminTestConfig } from "./helpers";
 import { startMockDrime } from "../fixtures/mock-drime/server";
+import { adminTestConfig } from "./helpers";
 
-async function ctxWith(password: string): Promise<{ ctx: AppContext; stop: () => void }> {
+async function ctxWith(
+  password: string,
+): Promise<{ ctx: AppContext; stop: () => void }> {
   const mock = await startMockDrime();
   const cfg = adminTestConfig(mock.baseUrl, { password });
-  const ctx = await createAppContext({ config: cfg, logger: pino({ level: "silent" }) });
+  const ctx = await createAppContext({
+    config: cfg,
+    logger: pino({ level: "silent" }),
+  });
   return { ctx, stop: () => mock.stop() };
 }
 
@@ -20,7 +25,7 @@ describe("admin router scaffold", () => {
       const url = new URL("http://127.0.0.1:8081/_admin/session");
       const res = await dispatchAdmin(ctx, new Request(url), url);
       expect(res.status).toBe(503);
-      const j = await res.json() as { error: { code: string } };
+      const j = (await res.json()) as { error: { code: string } };
       expect(j.error.code).toBe("AdminDisabled");
     } finally {
       stop();
@@ -48,7 +53,10 @@ describe("admin router scaffold", () => {
         ctx,
         new Request(loginUrl, {
           method: "POST",
-          headers: { Host: "127.0.0.1:8081", "Content-Type": "application/json" },
+          headers: {
+            Host: "127.0.0.1:8081",
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ password: "hunter2-hunter2" }),
         }),
         loginUrl,
@@ -62,7 +70,9 @@ describe("admin router scaffold", () => {
       const url = new URL("http://127.0.0.1:8081/_admin/no-such-thing");
       const res = await dispatchAdmin(
         ctx,
-        new Request(url, { headers: { Host: "127.0.0.1:8081", Cookie: cookie } }),
+        new Request(url, {
+          headers: { Host: "127.0.0.1:8081", Cookie: cookie },
+        }),
         url,
       );
       expect(res.status).toBe(404);

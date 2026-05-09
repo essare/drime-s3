@@ -1,7 +1,12 @@
-import type { AppContext } from "../../server-context";
 import { handleDeleteObjects } from "../../s3/handlers/batch";
+import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import { adminDeleteObject, adminGetObject, adminListObjects, adminPutObject } from "../shared";
+import {
+  adminDeleteObject,
+  adminGetObject,
+  adminListObjects,
+  adminPutObject,
+} from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(
@@ -25,7 +30,11 @@ export async function handleListObjectsAdmin(
     max: sp.has("max") ? Number(sp.get("max")) : undefined,
   });
   if (r.kind === "no-such-bucket") {
-    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+    return jsonError(
+      "NoSuchBucket",
+      "The specified bucket does not exist.",
+      404,
+    );
   }
   const l = r.listing;
   return jsonOk({
@@ -57,7 +66,11 @@ export async function handlePutObjectAdmin(
     Number.isFinite(len) ? (len as number) : null,
   );
   if (r.kind === "no-such-bucket") {
-    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+    return jsonError(
+      "NoSuchBucket",
+      "The specified bucket does not exist.",
+      404,
+    );
   }
   if (r.kind === "invalid") {
     return jsonError("BadRequest", r.message, 400);
@@ -76,7 +89,10 @@ export async function handleGetObjectAdmin(
 ): Promise<Response> {
   if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
   return adminGetObject(
-    ctx, ctx.gatewayWorkspaceId, bucket, key,
+    ctx,
+    ctx.gatewayWorkspaceId,
+    bucket,
+    key,
     req.headers.get("range"),
   );
 }
@@ -89,12 +105,19 @@ export async function handleDeleteObjectAdmin(
   if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
   const r = await adminDeleteObject(ctx, ctx.gatewayWorkspaceId, bucket, key);
   if (r.kind === "no-such-bucket") {
-    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+    return jsonError(
+      "NoSuchBucket",
+      "The specified bucket does not exist.",
+      404,
+    );
   }
   if (r.kind === "error") {
     return jsonError(r.code, r.message, r.status);
   }
-  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+  return new Response(null, {
+    status: 204,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 export async function handleBatchDeleteAdmin(
@@ -110,14 +133,20 @@ export async function handleBatchDeleteAdmin(
     return jsonError("BadRequest", "Body must be JSON.", 400);
   }
   if (!Array.isArray(body.keys) || body.keys.length === 0) {
-    return jsonError("BadRequest", "Field `keys` must be a non-empty array.", 400);
+    return jsonError(
+      "BadRequest",
+      "Field `keys` must be a non-empty array.",
+      400,
+    );
   }
   if (body.keys.length > 1000) {
     return jsonError("BadRequest", "At most 1000 keys per batch.", 400);
   }
   const keys = body.keys.map(String);
 
-  const xmlEntries = keys.map((k) => `<Object><Key>${escapeXml(k)}</Key></Object>`).join("");
+  const xmlEntries = keys
+    .map((k) => `<Object><Key>${escapeXml(k)}</Key></Object>`)
+    .join("");
   const bodyText = `<?xml version="1.0" encoding="UTF-8"?><Delete>${xmlEntries}</Delete>`;
   const res = await handleDeleteObjects(ctx, {
     bucket,
@@ -134,7 +163,11 @@ export async function handleBatchDeleteAdmin(
   for (const m of xml.matchAll(
     /<Error>(?:[\s\S]*?<Key>([^<]+)<\/Key>)(?:[\s\S]*?<Code>([^<]+)<\/Code>)?(?:[\s\S]*?<Message>([^<]*)<\/Message>)?/g,
   )) {
-    errors.push({ key: m[1] ?? "", code: m[2] ?? "InternalError", message: m[3] ?? "" });
+    errors.push({
+      key: m[1] ?? "",
+      code: m[2] ?? "InternalError",
+      message: m[3] ?? "",
+    });
   }
   return jsonOk({ deleted, errors });
 }

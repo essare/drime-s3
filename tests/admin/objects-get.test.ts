@@ -16,7 +16,9 @@ describe("GET /_admin/buckets/:b/objects/*key", () => {
         new Request(`${ORIG}/_admin/buckets/docs/objects/file.bin`, {
           method: "PUT",
           headers: {
-            Host: "127.0.0.1:8081", Cookie: cookie, Origin: ORIG,
+            Host: "127.0.0.1:8081",
+            Cookie: cookie,
+            Origin: ORIG,
             "Content-Length": String(body.length),
           },
           body,

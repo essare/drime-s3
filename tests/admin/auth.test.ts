@@ -50,7 +50,10 @@ describe("POST /_admin/login", () => {
       const res = await setup.call(
         new Request("http://127.0.0.1:8081/_admin/login", {
           method: "POST",
-          headers: { Host: "127.0.0.1:8081", "Content-Type": "application/json" },
+          headers: {
+            Host: "127.0.0.1:8081",
+            "Content-Type": "application/json",
+          },
           body: "not-json",
         }),
       );
@@ -80,7 +83,9 @@ describe("POST /_admin/login", () => {
     try {
       const res = await setup.call(loginReq({ password: "x" }));
       expect(res.status).toBe(503);
-      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AdminDisabled");
+      expect(
+        ((await res.json()) as { error: { code: string } }).error.code,
+      ).toBe("AdminDisabled");
     } finally {
       setup.cleanup();
     }
@@ -114,7 +119,10 @@ describe("/_admin/logout and /_admin/session", () => {
         }),
       );
       expect(res.status).toBe(200);
-      const j = (await res.json()) as { authenticated: boolean; expiresAt: string };
+      const j = (await res.json()) as {
+        authenticated: boolean;
+        expiresAt: string;
+      };
       expect(j.authenticated).toBe(true);
       expect(typeof j.expiresAt).toBe("string");
     } finally {
@@ -154,7 +162,9 @@ describe("admin/origin enforcement", () => {
         }),
       );
       expect(res.status).toBe(403);
-      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("Forbidden");
+      expect(
+        ((await res.json()) as { error: { code: string } }).error.code,
+      ).toBe("Forbidden");
     } finally {
       setup.cleanup();
     }

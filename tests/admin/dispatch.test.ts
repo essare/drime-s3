@@ -27,7 +27,10 @@ describe("admin/dispatch (front-of-line)", () => {
     try {
       const res = await setup.call(
         new Request("http://127.0.0.1:8081/", {
-          headers: { Host: "127.0.0.1:8081", Accept: "text/html,application/xhtml+xml" },
+          headers: {
+            Host: "127.0.0.1:8081",
+            Accept: "text/html,application/xhtml+xml",
+          },
         }),
       );
       expect(res.status).toBe(302);

@@ -28,7 +28,11 @@ export async function handleLogin(
 ): Promise<Response> {
   const ip = clientIp(req);
 
-  const gate = checkAndRecordLoginAttempt(ctx.webUi.loginAttempts, ip, Date.now());
+  const gate = checkAndRecordLoginAttempt(
+    ctx.webUi.loginAttempts,
+    ip,
+    Date.now(),
+  );
   if (!gate.allowed) {
     return jsonError(
       "RateLimited",
@@ -62,7 +66,10 @@ export async function handleLogin(
     secure: isHttps(req, url),
   });
 
-  const res = jsonOk({ authenticated: true, expiresInSec: SESSION_TTL_MS / 1000 });
+  const res = jsonOk({
+    authenticated: true,
+    expiresInSec: SESSION_TTL_MS / 1000,
+  });
   res.headers.append("Set-Cookie", cookie);
   return res;
 }

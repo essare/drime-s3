@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type SessionPayload = {
   iat: number; // epoch ms
@@ -43,7 +43,8 @@ export async function verifySessionToken(
   nowMs: number,
 ): Promise<VerifyResult> {
   const i = token.indexOf(".");
-  if (i <= 0 || i === token.length - 1) return { ok: false, reason: "malformed" };
+  if (i <= 0 || i === token.length - 1)
+    return { ok: false, reason: "malformed" };
   const payloadStr = token.slice(0, i);
   const macStr = token.slice(i + 1);
 
@@ -78,7 +79,10 @@ export async function verifySessionToken(
   return { ok: true, payload };
 }
 
-export function parseCookieHeader(header: string | null, name: string): string | null {
+export function parseCookieHeader(
+  header: string | null,
+  name: string,
+): string | null {
   if (!header) return null;
   for (const part of header.split(";")) {
     const trimmed = part.trim();
@@ -101,7 +105,8 @@ export function buildSetCookie(
     "Path=/_admin/",
   ];
   if (opts.expire) parts.push("Max-Age=0");
-  else if (typeof opts.ttlSec === "number") parts.push(`Max-Age=${opts.ttlSec}`);
+  else if (typeof opts.ttlSec === "number")
+    parts.push(`Max-Age=${opts.ttlSec}`);
   if (opts.secure) parts.push("Secure");
   return parts.join("; ");
 }

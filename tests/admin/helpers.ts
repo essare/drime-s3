@@ -2,7 +2,10 @@ import pino from "pino";
 import type { AppConfig } from "../../src/config";
 import { dispatch } from "../../src/s3/router";
 import { type AppContext, createAppContext } from "../../src/server-context";
-import { startMockDrime, type MockDrimeServer } from "../fixtures/mock-drime/server";
+import {
+  type MockDrimeServer,
+  startMockDrime,
+} from "../fixtures/mock-drime/server";
 
 export type AdminTestSetup = {
   ctx: AppContext;
@@ -13,11 +16,19 @@ export type AdminTestSetup = {
 
 export function adminTestConfig(
   apiBaseUrl: string,
-  overrides?: Partial<{ password: string; sessionSecretHex: string; insecure: boolean }>,
+  overrides?: Partial<{
+    password: string;
+    sessionSecretHex: string;
+    insecure: boolean;
+  }>,
 ): AppConfig {
   return {
     s3: { accessKey: "AKIATEST", secretKey: "x".repeat(40), region: "drime" },
-    drime: { apiKey: "mock-drime-key", apiBaseUrl, gatewayWorkspaceName: "drime-s3" },
+    drime: {
+      apiKey: "mock-drime-key",
+      apiBaseUrl,
+      gatewayWorkspaceName: "drime-s3",
+    },
     server: { host: "127.0.0.1", port: 8081 },
     webUi: {
       password: overrides?.password ?? "hunter2-hunter2",
@@ -27,16 +38,16 @@ export function adminTestConfig(
   };
 }
 
-export async function startAdmin(
-  options?: {
-    seedRootFolders?: string[];
-    config?: Partial<AppConfig>;
-    password?: string;
-    sessionSecretHex?: string;
-    gatewayWorkspaceName?: string;
-  },
-): Promise<AdminTestSetup> {
-  const mock = await startMockDrime({ seedRootFolders: options?.seedRootFolders });
+export async function startAdmin(options?: {
+  seedRootFolders?: string[];
+  config?: Partial<AppConfig>;
+  password?: string;
+  sessionSecretHex?: string;
+  gatewayWorkspaceName?: string;
+}): Promise<AdminTestSetup> {
+  const mock = await startMockDrime({
+    seedRootFolders: options?.seedRootFolders,
+  });
   const cfg = adminTestConfig(mock.baseUrl, {
     password: options?.password,
     sessionSecretHex: options?.sessionSecretHex,
@@ -45,7 +56,10 @@ export async function startAdmin(
     cfg.drime.gatewayWorkspaceName = options.gatewayWorkspaceName;
   }
   const merged = { ...cfg, ...(options?.config ?? {}) } as AppConfig;
-  const ctx = await createAppContext({ config: merged, logger: pino({ level: "silent" }) });
+  const ctx = await createAppContext({
+    config: merged,
+    logger: pino({ level: "silent" }),
+  });
   return {
     ctx,
     mock,

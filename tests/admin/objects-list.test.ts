@@ -6,11 +6,19 @@ function H(cookie: string) {
   return { Host: "127.0.0.1:8081", Cookie: cookie, Origin: ORIG };
 }
 
-async function putViaS3(setup: { call: (r: Request) => Promise<Response> }, bucket: string, key: string, body: string) {
+async function putViaS3(
+  setup: { call: (r: Request) => Promise<Response> },
+  bucket: string,
+  key: string,
+  body: string,
+) {
   const r = await setup.call(
     new Request(`${ORIG}/${bucket}/${key}`, {
       method: "PUT",
-      headers: { Host: "127.0.0.1:8081", "Content-Length": String(body.length) },
+      headers: {
+        Host: "127.0.0.1:8081",
+        "Content-Length": String(body.length),
+      },
       body,
     }),
   );
@@ -55,10 +63,14 @@ describe("GET /_admin/buckets/:b/objects", () => {
     try {
       const cookie = await loginCookie(setup, "hunter2-hunter2");
       const res = await setup.call(
-        new Request(`${ORIG}/_admin/buckets/nope/objects`, { headers: H(cookie) }),
+        new Request(`${ORIG}/_admin/buckets/nope/objects`, {
+          headers: H(cookie),
+        }),
       );
       expect(res.status).toBe(404);
-      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NoSuchBucket");
+      expect(
+        ((await res.json()) as { error: { code: string } }).error.code,
+      ).toBe("NoSuchBucket");
     } finally {
       setup.cleanup();
     }

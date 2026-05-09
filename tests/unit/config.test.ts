@@ -1,5 +1,5 @@
-import { unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
 import { loadConfig } from "../../src/config";
 
 describe("loadConfig", () => {
@@ -186,7 +186,9 @@ describe("loadConfig", () => {
     delete process.env.WEB_UI_SESSION_SECRET;
     process.env.DRIME_S3_INSECURE = "1";
 
-    const tmpDir = await Bun.file(`${process.env.TMPDIR ?? "/tmp"}/.placeholder`)
+    const tmpDir = await Bun.file(
+      `${process.env.TMPDIR ?? "/tmp"}/.placeholder`,
+    )
       .exists()
       .then(() => process.env.TMPDIR ?? "/tmp");
     const goodPath = `${tmpDir}/drime-s3-config-good-${Date.now()}-${Math.random().toString(36).slice(2)}.toml`;

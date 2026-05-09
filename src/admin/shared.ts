@@ -1,10 +1,16 @@
 import { normalizePathKey } from "../cache/folder-paths";
-import { jsonError } from "./errors";
-import type { AppContext } from "../server-context";
-import { findRootFolder, parseCreateFolderResponse } from "../s3/handlers/bucket";
+import {
+  findRootFolder,
+  parseCreateFolderResponse,
+} from "../s3/handlers/bucket";
+import {
+  type AdminListing,
+  listObjectsCore,
+} from "../s3/handlers/list-objects";
 import { handleObjectRequest } from "../s3/handlers/object";
-import { listObjectsCore, type AdminListing } from "../s3/handlers/list-objects";
 import { isValidBucketName } from "../s3/naming";
+import type { AppContext } from "../server-context";
+import { jsonError } from "./errors";
 
 export type BucketSummary = { name: string; createdAt: string };
 
@@ -91,7 +97,8 @@ export async function adminListObjects(
   if (q.delimiter) u.searchParams.set("delimiter", q.delimiter);
   if (q.token) u.searchParams.set("continuation-token", q.token);
   u.searchParams.set("list-type", "2");
-  if (q.max) u.searchParams.set("max-keys", String(Math.min(1000, Math.max(1, q.max))));
+  if (q.max)
+    u.searchParams.set("max-keys", String(Math.min(1000, Math.max(1, q.max))));
 
   const listing = await listObjectsCore(ctx, {
     bucket,
@@ -123,7 +130,8 @@ export async function adminPutObject(
   const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
   const headers = new Headers();
   if (contentType) headers.set("content-type", contentType);
-  if (contentLength !== null) headers.set("content-length", String(contentLength));
+  if (contentLength !== null)
+    headers.set("content-length", String(contentLength));
   headers.set("x-amz-content-sha256", "UNSIGNED-PAYLOAD");
 
   const synthReq = new Request(u, { method: "PUT", headers, body });
@@ -136,7 +144,12 @@ export async function adminPutObject(
     workspaceId: W,
   });
   if (res === null) {
-    return { kind: "error", status: 500, code: "InternalError", message: "Object handler returned null." };
+    return {
+      kind: "error",
+      status: 500,
+      code: "InternalError",
+      message: "Object handler returned null.",
+    };
   }
   if (res.status === 200) {
     const etag = res.headers.get("etag") ?? '"unknown"';
@@ -146,7 +159,10 @@ export async function adminPutObject(
 }
 
 function encodeKeyForUrl(key: string): string {
-  return key.split("/").map((p) => encodeURIComponent(p)).join("/");
+  return key
+    .split("/")
+    .map((p) => encodeURIComponent(p))
+    .join("/");
 }
 
 async function translateS3XmlError(res: Response): Promise<PutObjectResult> {
@@ -156,7 +172,8 @@ async function translateS3XmlError(res: Response): Promise<PutObjectResult> {
   const code = codeMatch?.[1] ?? "InternalError";
   const message = msgMatch?.[1] ?? "Object operation failed.";
   if (code === "NoSuchBucket") return { kind: "no-such-bucket" };
-  if (res.status >= 400 && res.status < 500) return { kind: "invalid", message };
+  if (res.status >= 400 && res.status < 500)
+    return { kind: "invalid", message };
   return { kind: "error", status: res.status, code, message };
 }
 
@@ -169,7 +186,11 @@ export async function adminGetObject(
 ): Promise<Response> {
   const folder = await findRootFolder(ctx, W, bucket);
   if (folder === undefined) {
-    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+    return jsonError(
+      "NoSuchBucket",
+      "The specified bucket does not exist.",
+      404,
+    );
   }
 
   const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
@@ -178,14 +199,26 @@ export async function adminGetObject(
 
   const synthReq = new Request(u, { method: "GET", headers });
   const res = await handleObjectRequest(ctx, {
-    method: "GET", bucket, key, url: u, req: synthReq, workspaceId: W,
+    method: "GET",
+    bucket,
+    key,
+    url: u,
+    req: synthReq,
+    workspaceId: W,
   });
   if (res === null) {
     return jsonError("InternalError", "Object handler returned null.", 500);
   }
   if (res.status === 200 || res.status === 206) {
     const out = new Headers();
-    for (const k of ["content-type", "content-length", "content-range", "etag", "last-modified", "accept-ranges"]) {
+    for (const k of [
+      "content-type",
+      "content-length",
+      "content-range",
+      "etag",
+      "last-modified",
+      "accept-ranges",
+    ]) {
       const v = res.headers.get(k);
       if (v) out.set(k, v);
     }
@@ -195,7 +228,11 @@ export async function adminGetObject(
   const text = await res.text();
   const codeMatch = /<Code>([^<]+)<\/Code>/.exec(text);
   const msgMatch = /<Message>([^<]*)<\/Message>/.exec(text);
-  return jsonError(codeMatch?.[1] ?? "InternalError", msgMatch?.[1] ?? "Download failed.", res.status);
+  return jsonError(
+    codeMatch?.[1] ?? "InternalError",
+    msgMatch?.[1] ?? "Download failed.",
+    res.status,
+  );
 }
 
 export async function adminDeleteObject(
@@ -203,17 +240,31 @@ export async function adminDeleteObject(
   W: number,
   bucket: string,
   key: string,
-): Promise<{ kind: "ok" } | { kind: "no-such-bucket" } | { kind: "error"; status: number; code: string; message: string }> {
+): Promise<
+  | { kind: "ok" }
+  | { kind: "no-such-bucket" }
+  | { kind: "error"; status: number; code: string; message: string }
+> {
   const folder = await findRootFolder(ctx, W, bucket);
   if (folder === undefined) return { kind: "no-such-bucket" };
 
   const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
   const synthReq = new Request(u, { method: "DELETE", headers: new Headers() });
   const res = await handleObjectRequest(ctx, {
-    method: "DELETE", bucket, key, url: u, req: synthReq, workspaceId: W,
+    method: "DELETE",
+    bucket,
+    key,
+    url: u,
+    req: synthReq,
+    workspaceId: W,
   });
   if (res === null) {
-    return { kind: "error", status: 500, code: "InternalError", message: "Object handler returned null." };
+    return {
+      kind: "error",
+      status: 500,
+      code: "InternalError",
+      message: "Object handler returned null.",
+    };
   }
   if (res.status === 204) return { kind: "ok" };
   const text = await res.text();

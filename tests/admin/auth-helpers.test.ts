@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { verifyPassword, checkAndRecordLoginAttempt } from "../../src/admin/auth";
+import {
+  checkAndRecordLoginAttempt,
+  verifyPassword,
+} from "../../src/admin/auth";
 
 describe("admin/auth helpers", () => {
   test("verifyPassword returns true on match, false on mismatch", () => {
@@ -29,11 +32,17 @@ describe("admin/auth helpers", () => {
     const map = new Map<string, { count: number; firstAttemptMs: number }>();
     const t0 = 2_000_000;
     for (let i = 0; i < 5; i++) {
-      expect(checkAndRecordLoginAttempt(map, "10.0.0.1", t0 + i).allowed).toBe(true);
+      expect(checkAndRecordLoginAttempt(map, "10.0.0.1", t0 + i).allowed).toBe(
+        true,
+      );
     }
     // ip-1 is now blocked; ip-2 should still be fresh
-    expect(checkAndRecordLoginAttempt(map, "10.0.0.1", t0 + 5).allowed).toBe(false);
-    expect(checkAndRecordLoginAttempt(map, "10.0.0.2", t0 + 5).allowed).toBe(true);
+    expect(checkAndRecordLoginAttempt(map, "10.0.0.1", t0 + 5).allowed).toBe(
+      false,
+    );
+    expect(checkAndRecordLoginAttempt(map, "10.0.0.2", t0 + 5).allowed).toBe(
+      true,
+    );
   });
 
   test("checkAndRecordLoginAttempt prunes stale entries when a fresh attempt arrives", () => {

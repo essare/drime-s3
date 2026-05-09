@@ -14,7 +14,9 @@ export function jsonError(
   details?: Record<string, unknown>,
   extraHeaders?: HeadersInit,
 ): Response {
-  const body = { error: details ? { code, message, details } : { code, message } };
+  const body = {
+    error: details ? { code, message, details } : { code, message },
+  };
   const h = new Headers(extraHeaders);
   h.set("Content-Type", "application/json");
   h.set("Cache-Control", "no-store");
@@ -23,11 +25,17 @@ export function jsonError(
 
 export function jsonStream(
   body: BodyInit,
-  init: { status?: number; contentType: string; contentLength?: number; extraHeaders?: HeadersInit },
+  init: {
+    status?: number;
+    contentType: string;
+    contentLength?: number;
+    extraHeaders?: HeadersInit;
+  },
 ): Response {
   const h = new Headers(init.extraHeaders);
   h.set("Content-Type", init.contentType);
   h.set("Cache-Control", "no-store");
-  if (typeof init.contentLength === "number") h.set("Content-Length", String(init.contentLength));
+  if (typeof init.contentLength === "number")
+    h.set("Content-Length", String(init.contentLength));
   return new Response(body, { status: init.status ?? 200, headers: h });
 }

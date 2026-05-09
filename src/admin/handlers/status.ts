@@ -1,5 +1,5 @@
-import type { AppContext } from "../../server-context";
 import { findWorkspaceIdByName } from "../../drime/workspace";
+import type { AppContext } from "../../server-context";
 import { jsonOk } from "../errors";
 
 export async function handleStatus(ctx: AppContext): Promise<Response> {
@@ -21,7 +21,10 @@ export async function handleStatus(ctx: AppContext): Promise<Response> {
     const rows = await ctx.drime.listWorkspaces();
     latencyMs = Math.round(performance.now() - t0);
     reachable = true;
-    const found = findWorkspaceIdByName(rows, ctx.config.drime.gatewayWorkspaceName);
+    const found = findWorkspaceIdByName(
+      rows,
+      ctx.config.drime.gatewayWorkspaceName,
+    );
     workspaceId = typeof found === "number" ? found : null;
   } catch (e) {
     latencyMs = Math.round(performance.now() - t0);
