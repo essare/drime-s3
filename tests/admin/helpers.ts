@@ -33,6 +33,7 @@ export async function startAdmin(
     config?: Partial<AppConfig>;
     password?: string;
     sessionSecretHex?: string;
+    gatewayWorkspaceName?: string;
   },
 ): Promise<AdminTestSetup> {
   const mock = await startMockDrime({ seedRootFolders: options?.seedRootFolders });
@@ -40,6 +41,9 @@ export async function startAdmin(
     password: options?.password,
     sessionSecretHex: options?.sessionSecretHex,
   });
+  if (options?.gatewayWorkspaceName) {
+    cfg.drime.gatewayWorkspaceName = options.gatewayWorkspaceName;
+  }
   const merged = { ...cfg, ...(options?.config ?? {}) } as AppConfig;
   const ctx = await createAppContext({ config: merged, logger: pino({ level: "silent" }) });
   return {

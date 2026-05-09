@@ -1,8 +1,9 @@
 import type { AppContext } from "../server-context";
-import { checkOrigin } from "./auth";
+import { checkOrigin, requireSession } from "./auth";
 import { jsonError } from "./errors";
 import { handleHealth } from "./handlers/health";
 import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
+import { handleStatus } from "./handlers/status";
 
 export async function dispatchAdmin(
   ctx: AppContext,
@@ -12,10 +13,7 @@ export async function dispatchAdmin(
   const method = req.method.toUpperCase();
   const path = url.pathname;
 
-  // Public health is always available, even without WEB_UI_PASSWORD.
-  if (method === "GET" && path === "/_admin/health") {
-    return handleHealth(ctx);
-  }
+  if (method === "GET" && path === "/_admin/health") return handleHealth(ctx);
 
   if (!ctx.webUi.enabled) {
     return jsonError(
@@ -28,16 +26,14 @@ export async function dispatchAdmin(
   const originErr = checkOrigin(req);
   if (originErr) return originErr;
 
-  if (method === "POST" && path === "/_admin/login") {
-    return handleLogin(ctx, req, url);
-  }
-  if (method === "POST" && path === "/_admin/logout") {
-    return handleLogout(ctx, req, url);
-  }
-  if (method === "GET" && path === "/_admin/session") {
-    return handleGetSession(ctx, req);
-  }
+  if (method === "POST" && path === "/_admin/login") return handleLogin(ctx, req, url);
+  if (method === "POST" && path === "/_admin/logout") return handleLogout(ctx, req, url);
+  if (method === "GET" && path === "/_admin/session") return handleGetSession(ctx, req);
 
-  // Real route table grows in later tasks.
+  const sessionErr = await requireSession(ctx, req);
+  if (sessionErr) return sessionErr;
+
+  if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
+
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);
 }
