@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 
+import type { AppContext } from "../server-context";
+import { parseCookieHeader, verifySessionToken } from "./cookies";
+import { jsonError } from "./errors";
+
 const WINDOW_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 5;
 
@@ -52,4 +56,29 @@ function pruneExpiredAttempts(
       map.delete(ip);
     }
   }
+}
+
+/**
+ * Same-origin enforcement: when `Origin` is present, it must equal `http(s)://<host>`.
+ * Used for state-changing /_admin/* requests (cookie + Origin pin = no CSRF).
+ */
+export function checkOrigin(req: Request): Response | null {
+  const origin = req.headers.get("origin");
+  if (!origin) return null;
+  const host = req.headers.get("host") ?? "";
+  // Allow http and https of the same host:port.
+  const expected = new Set([`http://${host}`, `https://${host}`]);
+  if (expected.has(origin)) return null;
+  return jsonError("Forbidden", "Cross-origin request blocked.", 403);
+}
+
+export async function requireSession(
+  ctx: AppContext,
+  req: Request,
+): Promise<Response | null> {
+  const raw = parseCookieHeader(req.headers.get("cookie"), "drime_admin");
+  if (!raw) return jsonError("Unauthorized", "Login required.", 401);
+  const v = await verifySessionToken(raw, ctx.webUi.sessionSecret, Date.now());
+  if (!v.ok) return jsonError("Unauthorized", "Session invalid or expired.", 401);
+  return null;
 }

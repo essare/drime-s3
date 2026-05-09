@@ -1,4 +1,5 @@
 import type { AppContext } from "../server-context";
+import { checkOrigin } from "./auth";
 import { jsonError } from "./errors";
 import { handleHealth } from "./handlers/health";
 import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
@@ -23,6 +24,9 @@ export async function dispatchAdmin(
       503,
     );
   }
+
+  const originErr = checkOrigin(req);
+  if (originErr) return originErr;
 
   if (method === "POST" && path === "/_admin/login") {
     return handleLogin(ctx, req, url);

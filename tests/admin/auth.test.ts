@@ -138,3 +138,44 @@ describe("/_admin/logout and /_admin/session", () => {
     }
   });
 });
+
+describe("admin/origin enforcement", () => {
+  test("/_admin/session with mismatched Origin returns 403", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request("http://127.0.0.1:8081/_admin/session", {
+          headers: {
+            Host: "127.0.0.1:8081",
+            Cookie: cookie,
+            Origin: "http://evil.example",
+          },
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("Forbidden");
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("/_admin/session with matching Origin works", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request("http://127.0.0.1:8081/_admin/session", {
+          headers: {
+            Host: "127.0.0.1:8081",
+            Cookie: cookie,
+            Origin: "http://127.0.0.1:8081",
+          },
+        }),
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      setup.cleanup();
+    }
+  });
+});
