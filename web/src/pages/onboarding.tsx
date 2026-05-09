@@ -1,6 +1,19 @@
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { OnboardingWizard } from "@/components/onboarding/wizard";
+import { useStatusQuery } from "@/hooks/use-status";
 
 export default function OnboardingPage() {
+  const status = useStatusQuery();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (status.data?.workspace.exists === true) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [status.data?.workspace.exists, navigate]);
+
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
       <div>
