@@ -1,5 +1,6 @@
 import type { AppContext } from "../server-context";
 import { jsonError } from "./errors";
+import { handleHealth } from "./handlers/health";
 
 export async function dispatchAdmin(
   ctx: AppContext,
@@ -11,8 +12,7 @@ export async function dispatchAdmin(
 
   // Public health is always available, even without WEB_UI_PASSWORD.
   if (method === "GET" && path === "/_admin/health") {
-    // Real handler wired in Task 9.
-    return jsonError("NotFound", "Not Implemented", 404);
+    return handleHealth(ctx);
   }
 
   if (!ctx.webUi.enabled) {
