@@ -181,15 +181,6 @@ export async function dispatch(
       if (hit !== null) {
         return withRequestId(hit, rid);
       }
-      if (method === "GET") {
-        return new Response(
-          s3ErrorXml("NotImplemented", "ListObjects is not implemented yet."),
-          withAmzHeaders(rid, {
-            status: 501,
-            headers: { "Content-Type": "application/xml" },
-          }),
-        );
-      }
       return new Response(
         s3ErrorXml("NotImplemented", "This operation is not implemented yet."),
         withAmzHeaders(rid, {

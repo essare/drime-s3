@@ -158,17 +158,42 @@ export async function startMockDrime(
       }
 
       if (req.method === "POST" && path === "/uploads") {
-        const id = nextId++;
-        return json({
-          fileEntry: {
+        return (async () => {
+          const ct = req.headers.get("content-type") ?? "";
+          let parentId: number | null = null;
+          let ws = workspaceId;
+          let relativePath = "uploaded";
+          if (ct.includes("multipart/form-data")) {
+            const fd = await req.formData();
+            const pid = fd.get("parentId");
+            if (typeof pid === "string" && /^\d+$/.test(pid)) {
+              parentId = Number(pid);
+            }
+            const wid = fd.get("workspaceId");
+            if (typeof wid === "string" && /^\d+$/.test(wid)) {
+              ws = Number(wid);
+            }
+            const rp = fd.get("relativePath");
+            if (typeof rp === "string" && rp.length > 0) {
+              relativePath = rp;
+            }
+          }
+          const id = nextId++;
+          const name = relativePath.includes("/")
+            ? (relativePath.split("/").pop() ?? "file")
+            : relativePath;
+          const row: Entry = {
             id,
-            name: "uploaded",
+            name,
             type: "text",
-            file_size: 0,
-            parent_id: null,
-            updated_at: "2024-06-01T12:00:00.000Z",
-          },
-        });
+            parent_id: parentId,
+            workspaceId: ws,
+            file_size: 1,
+            updated_at: "2024-07-01T10:00:00.000Z",
+          };
+          entries.push(row);
+          return json({ fileEntry: entryToJson(row) });
+        })();
       }
 
       if (req.method === "POST" && path === "/file-entries/delete") {

@@ -8,6 +8,7 @@ import {
   bucketLocationXml,
   bucketVersioningXml,
 } from "../xml";
+import { handleListObjects } from "./list-objects";
 
 function xmlErr(status: number, code: string, message: string): Response {
   return new Response(s3ErrorXml(code, message), {
@@ -92,7 +93,20 @@ export async function handleBucketOnly(
         headers: { "Content-Type": "application/xml" },
       });
     }
-    return null;
+    const folder = await findRootFolder(ctx, W, bucket);
+    if (folder === undefined) {
+      return xmlErr(
+        404,
+        "NoSuchBucket",
+        "The specified bucket does not exist.",
+      );
+    }
+    return handleListObjects(ctx, {
+      bucket,
+      url,
+      workspaceId: W,
+      bucketFolderId: folder.id,
+    });
   }
 
   return null;
@@ -148,6 +162,7 @@ async function handleDeleteBucket(
 
   await ctx.drime.deleteEntriesForever([folder.id]);
   ctx.listCache.invalidate(null);
+  ctx.listCache.invalidate(folder.id);
   ctx.folderCache.evictPrefix(normalizePathKey(bucket));
 
   return new Response(null, { status: 204 });
