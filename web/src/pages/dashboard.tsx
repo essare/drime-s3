@@ -1,13 +1,21 @@
-import { Package, Plus } from "lucide-react";
+import { MoreHorizontal, Package, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { CreateBucketDialog } from "@/components/buckets/create-bucket-dialog";
+import { DeleteBucketDialog } from "@/components/buckets/delete-bucket-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBucketsQuery } from "@/hooks/use-buckets";
+import { useDeleteBucket } from "@/hooks/use-delete-bucket";
 import { useStatusQuery } from "@/hooks/use-status";
 import { formatRelativeDate } from "@/lib/format";
 import type { StatusData } from "@/lib/schemas";
@@ -25,8 +33,20 @@ function statusSubtitle(data: StatusData | undefined): string {
 
 export default function DashboardPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ name: string } | null>(
+    null,
+  );
   const statusQuery = useStatusQuery();
   const bucketsQuery = useBucketsQuery();
+  const deleteBucket = useDeleteBucket();
+
+  const onConfirmDelete = () => {
+    if (!pendingDelete) return;
+    deleteBucket.mutate(
+      { name: pendingDelete.name },
+      { onSettled: () => setPendingDelete(null) },
+    );
+  };
 
   const count = bucketsQuery.data?.count ?? 0;
   const buckets = bucketsQuery.data?.buckets ?? [];
@@ -57,6 +77,12 @@ export default function DashboardPage() {
       </div>
 
       <CreateBucketDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <DeleteBucketDialog
+        bucket={pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={onConfirmDelete}
+        pending={deleteBucket.isPending}
+      />
 
       {bucketsQuery.isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -115,24 +141,48 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {buckets.map((b) => (
-            <Link key={b.name} to={`/buckets/${b.name}`}>
-              <Card className="h-full transition-colors hover:bg-accent">
-                <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-2">
-                  <Package
-                    className="mt-0.5 size-5 shrink-0 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <CardTitle className="truncate text-base font-medium leading-tight">
-                    {b.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-xs text-muted-foreground">
-                    {formatRelativeDate(b.createdAt)}
-                  </p>
-                </CardContent>
-              </Card>
-            </Link>
+            <div key={b.name} className="relative">
+              <Link to={`/buckets/${b.name}`} className="block h-full">
+                <Card className="h-full transition-colors hover:bg-accent">
+                  <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-2">
+                    <Package
+                      className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <CardTitle className="truncate text-base font-medium leading-tight">
+                      {b.name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <p className="text-xs text-muted-foreground">
+                      {formatRelativeDate(b.createdAt)}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-2 right-2 z-10 size-8 text-muted-foreground hover:text-foreground"
+                    aria-label={`Bucket ${b.name} actions`}
+                  >
+                    <MoreHorizontal className="size-4" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => setPendingDelete({ name: b.name })}
+                  >
+                    <Trash2 className="mr-2 size-4" aria-hidden />
+                    Delete bucket
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           ))}
         </div>
       )}
