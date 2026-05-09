@@ -1,12 +1,13 @@
 import { QueryClient } from "@tanstack/react-query";
 
+import { AdminApiError } from "./api";
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {
-        // TODO(task-6): replace with AdminApiError
-        const status = (error as { status?: number } | null)?.status;
-        if (status === 401) return false;
+        if (error instanceof AdminApiError && error.status === 401)
+          return false;
         return failureCount < 1;
       },
       refetchOnWindowFocus: false,
