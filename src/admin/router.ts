@@ -6,6 +6,7 @@ import {
   handleDeleteBucketAdmin,
   handleListBucketsAdmin,
 } from "./handlers/buckets";
+import { handleListObjectsAdmin } from "./handlers/objects";
 import { handleHealth } from "./handlers/health";
 import { handleInit } from "./handlers/init";
 import { handleGetSession, handleLogin, handleLogout } from "./handlers/session";
@@ -47,6 +48,11 @@ export async function dispatchAdmin(
   const bucketOnly = /^\/_admin\/buckets\/([^/]+)$/.exec(path);
   if (bucketOnly && method === "DELETE") {
     return handleDeleteBucketAdmin(ctx, decodeURIComponent(bucketOnly[1] ?? ""));
+  }
+
+  const objectsList = /^\/_admin\/buckets\/([^/]+)\/objects$/.exec(path);
+  if (objectsList && method === "GET") {
+    return handleListObjectsAdmin(ctx, decodeURIComponent(objectsList[1] ?? ""), url);
   }
 
   return jsonError("NotFound", `No admin route for ${method} ${path}`, 404);
