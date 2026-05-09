@@ -4,6 +4,7 @@ import { loadConfig } from "../../src/config";
 describe("loadConfig", () => {
   beforeEach(() => {
     delete process.env.DRIME_API_KEY;
+    delete process.env.API_KEY;
     delete process.env.S3_ACCESS_KEY;
     delete process.env.S3_SECRET_KEY;
     delete process.env.DRIME_S3_INSECURE;
@@ -13,6 +14,7 @@ describe("loadConfig", () => {
   });
   afterEach(() => {
     delete process.env.DRIME_API_KEY;
+    delete process.env.API_KEY;
     delete process.env.S3_ACCESS_KEY;
     delete process.env.S3_SECRET_KEY;
     delete process.env.DRIME_S3_INSECURE;
@@ -26,6 +28,21 @@ describe("loadConfig", () => {
     process.env.DRIME_API_KEY = "env-key";
     const c = await loadConfig({ configPath: "/nonexistent.toml" });
     expect(c.drime.apiKey).toBe("env-key");
+  });
+
+  test("DRIME_API_KEY wins over API_KEY", async () => {
+    process.env.DRIME_S3_INSECURE = "1";
+    process.env.API_KEY = "api-key-fallback";
+    process.env.DRIME_API_KEY = "primary";
+    const c = await loadConfig({ configPath: "/nonexistent.toml" });
+    expect(c.drime.apiKey).toBe("primary");
+  });
+
+  test("API_KEY used when DRIME_API_KEY unset", async () => {
+    process.env.DRIME_S3_INSECURE = "1";
+    process.env.API_KEY = "from-api-key-env";
+    const c = await loadConfig({ configPath: "/nonexistent.toml" });
+    expect(c.drime.apiKey).toBe("from-api-key-env");
   });
 
   test("DRIME_API_BASE_URL override", async () => {

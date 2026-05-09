@@ -12,7 +12,7 @@ bun install
 
 1. **Environment**
 
-   - `DRIME_API_KEY` — Drime API bearer token (required).
+   - `DRIME_API_KEY` or `API_KEY` — Drime API bearer token (Bun loads `.env` automatically for `bun run`).
    - `DRIME_API_BASE_URL` — optional; default `https://app.drime.cloud/api/v1`.
    - `DRIME_S3_INSECURE=1` or `--insecure` — skips S3 Sig V4 verification (local dev only; do not expose publicly).
    - `DRIME_GATEWAY_WORKSPACE_NAME` — optional; default `drime-s3`.

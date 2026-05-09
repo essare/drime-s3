@@ -137,7 +137,9 @@ function applyEnv(cfg: AppConfig): void {
   const apiBase = pickNonEmptyString(process.env.DRIME_API_BASE_URL);
   if (apiBase !== undefined) cfg.drime.apiBaseUrl = apiBase;
 
-  const apiKey = pickNonEmptyString(process.env.DRIME_API_KEY);
+  const apiKey =
+    pickNonEmptyString(process.env.DRIME_API_KEY) ??
+    pickNonEmptyString(process.env.API_KEY);
   if (apiKey !== undefined) cfg.drime.apiKey = apiKey;
 
   const access = pickNonEmptyString(process.env.S3_ACCESS_KEY);
