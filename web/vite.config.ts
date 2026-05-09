@@ -9,6 +9,17 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    proxy: {
+      "/_admin": {
+        target: "http://127.0.0.1:8081",
+        changeOrigin: true,
+      },
+      // Optional (spec §8.1): also forward S3-style paths to the gateway during dev:
+      //   "^/(?!_ui/|@vite|src/|node_modules/|@react-refresh|@id/).*": {
+      //     target: "http://127.0.0.1:8081",
+      //     changeOrigin: true,
+      //   },
+    },
   },
   plugins: [react(), tailwindcss()],
   resolve: {
