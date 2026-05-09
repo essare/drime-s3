@@ -1,4 +1,19 @@
 import { type FileEntry, fromFileEntryJson } from "./types";
+import type { WorkspaceRow } from "./workspace";
+import {
+  findWorkspaceIdByName,
+  parseWorkspaceCreate,
+  parseWorkspaceList,
+} from "./workspace";
+
+export type { WorkspaceRow } from "./workspace";
+
+export class GatewayWorkspaceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GatewayWorkspaceError";
+  }
+}
 
 export class DrimeApiError extends Error {
   constructor(
@@ -157,10 +172,14 @@ export class DrimeClient {
     return entries;
   }
 
-  async createFolder(name: string, parentId?: number): Promise<unknown> {
-    const body: Record<string, unknown> = { name, workspaceId: 0 };
-    if (parentId !== undefined) {
-      body.parentId = parentId;
+  async createFolder(
+    name: string,
+    opts?: { parentId?: number; workspaceId?: number },
+  ): Promise<unknown> {
+    const workspaceId = opts?.workspaceId ?? 0;
+    const body: Record<string, unknown> = { name, workspaceId };
+    if (opts?.parentId !== undefined) {
+      body.parentId = opts.parentId;
     }
 
     const res = await this.request("POST", "/folders", {
@@ -174,11 +193,14 @@ export class DrimeClient {
     filePath: string;
     relativePath: string;
     parentId?: number;
+    /** Drime workspace for uploads (gateway workspace id `W`). Defaults to `0` for legacy/tests. */
+    workspaceId?: number;
   }): Promise<unknown> {
+    const workspaceId = params.workspaceId ?? 0;
     const form = new FormData();
     form.append("file", Bun.file(params.filePath));
     form.append("relativePath", params.relativePath);
-    form.append("workspaceId", "0");
+    form.append("workspaceId", String(workspaceId));
     if (params.parentId !== undefined) {
       form.append("parentId", String(params.parentId));
     }
@@ -193,5 +215,53 @@ export class DrimeClient {
       body: JSON.stringify({ entryIds: ids, deleteForever: true }),
     });
     return res.json();
+  }
+
+  /** `GET /me/workspaces` — bearer token same as other Drime calls. */
+  async listWorkspaces(): Promise<WorkspaceRow[]> {
+    const res = await this.request("GET", "/me/workspaces");
+    const json: unknown = await res.json();
+    return parseWorkspaceList(json);
+  }
+
+  /** `POST /workspace` with `{"name":"..."}`. Returns new workspace id. */
+  async createWorkspace(name: string): Promise<number> {
+    const res = await this.request("POST", "/workspace", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const json: unknown = await res.json();
+    return parseWorkspaceCreate(json);
+  }
+
+  /**
+   * Idempotent bootstrap for `drime-s3 init`: create the named workspace if absent.
+   */
+  async ensureGatewayWorkspace(name: string): Promise<number> {
+    const rows = await this.listWorkspaces();
+    const existing = findWorkspaceIdByName(rows, name);
+    if (existing !== undefined) return existing;
+    return this.createWorkspace(name);
+  }
+
+  /**
+   * Resolve workspace id for `serve`. Does **not** create — throws `GatewayWorkspaceError` if missing
+   * (caller should instruct user to run `drime-s3 init`).
+   */
+  async resolveGatewayWorkspaceId(opts: {
+    name: string;
+    pinnedId?: number;
+  }): Promise<number> {
+    if (opts.pinnedId !== undefined && Number.isFinite(opts.pinnedId)) {
+      return opts.pinnedId;
+    }
+    const rows = await this.listWorkspaces();
+    const id = findWorkspaceIdByName(rows, opts.name);
+    if (id === undefined) {
+      throw new GatewayWorkspaceError(
+        `Drime workspace "${opts.name}" not found. Run: drime-s3 init`,
+      );
+    }
+    return id;
   }
 }

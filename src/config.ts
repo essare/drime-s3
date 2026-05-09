@@ -19,6 +19,10 @@ export type S3AuthConfig = {
 export type DrimeConfig = {
   apiKey: string;
   apiBaseUrl: string;
+  /** Drime workspace whose root folders map to S3 buckets (default `drime-s3`). */
+  gatewayWorkspaceName: string;
+  /** If set, skip `GET /me/workspaces` discovery and use this id. */
+  gatewayWorkspaceId?: number;
 };
 
 export type ServerConfig = {
@@ -51,6 +55,8 @@ function defaultConfig(): AppConfig {
     drime: {
       apiKey: "",
       apiBaseUrl: DEFAULT_DRIME_API_BASE,
+      gatewayWorkspaceName: "drime-s3",
+      gatewayWorkspaceId: undefined,
     },
     server: {
       host: "127.0.0.1",
@@ -101,8 +107,20 @@ function applyToml(cfg: AppConfig, root: TomlRoot): void {
   if (drime) {
     const apiKey = pickNonEmptyString(drime.api_key);
     const apiBaseUrl = pickNonEmptyString(drime.api_base_url);
+    const gatewayName =
+      pickNonEmptyString(drime.gateway_workspace_name) ??
+      pickNonEmptyString(drime.gatewayWorkspaceName);
+    const gatewayIdRaw = drime.gateway_workspace_id ?? drime.gatewayWorkspaceId;
     if (apiKey !== undefined) cfg.drime.apiKey = apiKey;
     if (apiBaseUrl !== undefined) cfg.drime.apiBaseUrl = apiBaseUrl;
+    if (gatewayName !== undefined) cfg.drime.gatewayWorkspaceName = gatewayName;
+    if (gatewayIdRaw !== undefined) {
+      const n =
+        typeof gatewayIdRaw === "number"
+          ? gatewayIdRaw
+          : Number.parseInt(String(gatewayIdRaw), 10);
+      if (Number.isInteger(n) && n > 0) cfg.drime.gatewayWorkspaceId = n;
+    }
   }
   const server = root.server;
   if (server) {
@@ -123,6 +141,20 @@ function applyEnv(cfg: AppConfig): void {
   if (access !== undefined) cfg.s3.accessKey = access;
   const secret = pickNonEmptyString(process.env.S3_SECRET_KEY);
   if (secret !== undefined) cfg.s3.secretKey = secret;
+
+  const gwName = pickNonEmptyString(process.env.DRIME_GATEWAY_WORKSPACE_NAME);
+  if (gwName !== undefined) cfg.drime.gatewayWorkspaceName = gwName;
+
+  const gwIdRaw = process.env.DRIME_GATEWAY_WORKSPACE_ID;
+  if (gwIdRaw !== undefined && gwIdRaw.trim() !== "") {
+    const n = Number.parseInt(gwIdRaw.trim(), 10);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new ConfigError(
+        `Invalid DRIME_GATEWAY_WORKSPACE_ID: expected positive integer, got ${JSON.stringify(gwIdRaw)}`,
+      );
+    }
+    cfg.drime.gatewayWorkspaceId = n;
+  }
 
   const host = pickNonEmptyString(process.env.DRIME_S3_HOST);
   if (host !== undefined) cfg.server.host = host;
