@@ -1,6 +1,7 @@
 import { normalizePathKey } from "../cache/folder-paths";
 import type { AppContext } from "../server-context";
 import { findRootFolder, parseCreateFolderResponse } from "../s3/handlers/bucket";
+import { handleObjectRequest } from "../s3/handlers/object";
 import { listObjectsCore, type AdminListing } from "../s3/handlers/list-objects";
 import { isValidBucketName } from "../s3/naming";
 
@@ -98,4 +99,62 @@ export async function adminListObjects(
     bucketFolderId: folder.id,
   });
   return { kind: "ok", listing };
+}
+
+export type PutObjectResult =
+  | { kind: "ok"; etag: string; size: number }
+  | { kind: "no-such-bucket" }
+  | { kind: "invalid"; message: string }
+  | { kind: "error"; status: number; code: string; message: string };
+
+export async function adminPutObject(
+  ctx: AppContext,
+  W: number,
+  bucket: string,
+  key: string,
+  body: ReadableStream<Uint8Array> | ArrayBuffer | null,
+  contentType: string | null,
+  contentLength: number | null,
+): Promise<PutObjectResult> {
+  const folder = await findRootFolder(ctx, W, bucket);
+  if (folder === undefined) return { kind: "no-such-bucket" };
+
+  const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
+  const headers = new Headers();
+  if (contentType) headers.set("content-type", contentType);
+  if (contentLength !== null) headers.set("content-length", String(contentLength));
+  headers.set("x-amz-content-sha256", "UNSIGNED-PAYLOAD");
+
+  const synthReq = new Request(u, { method: "PUT", headers, body });
+  const res = await handleObjectRequest(ctx, {
+    method: "PUT",
+    bucket,
+    key,
+    url: u,
+    req: synthReq,
+    workspaceId: W,
+  });
+  if (res === null) {
+    return { kind: "error", status: 500, code: "InternalError", message: "Object handler returned null." };
+  }
+  if (res.status === 200) {
+    const etag = res.headers.get("etag") ?? '"unknown"';
+    return { kind: "ok", etag, size: contentLength ?? 0 };
+  }
+  return await translateS3XmlError(res);
+}
+
+function encodeKeyForUrl(key: string): string {
+  return key.split("/").map((p) => encodeURIComponent(p)).join("/");
+}
+
+async function translateS3XmlError(res: Response): Promise<PutObjectResult> {
+  const text = await res.text();
+  const codeMatch = /<Code>([^<]+)<\/Code>/.exec(text);
+  const msgMatch = /<Message>([^<]*)<\/Message>/.exec(text);
+  const code = codeMatch?.[1] ?? "InternalError";
+  const message = msgMatch?.[1] ?? "Object operation failed.";
+  if (code === "NoSuchBucket") return { kind: "no-such-bucket" };
+  if (res.status >= 400 && res.status < 500) return { kind: "invalid", message };
+  return { kind: "error", status: res.status, code, message };
 }

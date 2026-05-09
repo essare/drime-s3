@@ -1,6 +1,6 @@
 import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import { adminListObjects } from "../shared";
+import { adminListObjects, adminPutObject } from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(
@@ -34,4 +34,35 @@ export async function handleListObjectsAdmin(
     commonPrefixes: l.commonPrefixes,
     nextToken: l.nextToken,
   });
+}
+
+export async function handlePutObjectAdmin(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+  req: Request,
+): Promise<Response> {
+  if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
+  const cl = req.headers.get("content-length");
+  const len = cl === null ? null : Number.parseInt(cl, 10);
+  const ct = req.headers.get("content-type");
+  const r = await adminPutObject(
+    ctx,
+    ctx.gatewayWorkspaceId,
+    bucket,
+    key,
+    req.body,
+    ct,
+    Number.isFinite(len) ? (len as number) : null,
+  );
+  if (r.kind === "no-such-bucket") {
+    return jsonError("NoSuchBucket", "The specified bucket does not exist.", 404);
+  }
+  if (r.kind === "invalid") {
+    return jsonError("BadRequest", r.message, 400);
+  }
+  if (r.kind === "error") {
+    return jsonError(r.code, r.message, r.status);
+  }
+  return jsonOk({ etag: r.etag, size: r.size });
 }
