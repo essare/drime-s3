@@ -12,7 +12,9 @@ const NotFoundPage = lazy(() => import("./pages/not-found"));
 
 export default function App() {
   return (
-    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading…</div>}>
+    <Suspense
+      fallback={<div className="p-8 text-muted-foreground">Loading…</div>}
+    >
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/setup" element={<SetupPage />} />

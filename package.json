@@ -19,7 +19,12 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "build": "bun build src/cli/main.ts --outdir=dist --target=bun"
+    "build": "bun build src/cli/main.ts --outdir=dist --target=bun",
+    "web:dev": "bun run --cwd web dev",
+    "web:build": "bun run --cwd web build",
+    "web:test": "bun run --cwd web test",
+    "web:lint": "bun run --cwd web lint",
+    "web:typecheck": "bun run --cwd web typecheck"
   },
   "dependencies": {
     "fast-xml-parser": "^5.7.3",
