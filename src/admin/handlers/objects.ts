@@ -53,18 +53,7 @@ export async function handlePutObjectAdmin(
   req: Request,
 ): Promise<Response> {
   if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
-  const cl = req.headers.get("content-length");
-  const len = cl === null ? null : Number.parseInt(cl, 10);
-  const ct = req.headers.get("content-type");
-  const r = await adminPutObject(
-    ctx,
-    ctx.gatewayWorkspaceId,
-    bucket,
-    key,
-    req.body,
-    ct,
-    Number.isFinite(len) ? (len as number) : null,
-  );
+  const r = await adminPutObject(ctx, ctx.gatewayWorkspaceId, bucket, key, req);
   if (r.kind === "no-such-bucket") {
     return jsonError(
       "NoSuchBucket",

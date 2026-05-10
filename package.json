@@ -14,12 +14,18 @@
     "smoke:multipart:selftest": "bun run scripts/multipart-smoke-selftest.ts",
     "smoke:large:aws": "bun run scripts/real-large-s3-upload.ts",
     "smoke:large:aws:selftest": "bun run scripts/real-large-s3-upload-selftest.ts",
+    "smoke:admin": "scripts/smoke/admin-curl-flow.sh",
     "verify:multipart": "bun run scripts/real-large-s3-upload-selftest.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "build": "bun build src/cli/main.ts --outdir=dist --target=bun"
+    "build": "bun run scripts/build-release.ts",
+    "web:dev": "bun run --cwd web dev",
+    "web:build": "bun run --cwd web build",
+    "web:test": "bun run --cwd web test",
+    "web:lint": "bun run --cwd web lint",
+    "web:typecheck": "bun run --cwd web typecheck"
   },
   "dependencies": {
     "fast-xml-parser": "^5.7.3",
