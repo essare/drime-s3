@@ -14,6 +14,7 @@
     "smoke:multipart:selftest": "bun run scripts/multipart-smoke-selftest.ts",
     "smoke:large:aws": "bun run scripts/real-large-s3-upload.ts",
     "smoke:large:aws:selftest": "bun run scripts/real-large-s3-upload-selftest.ts",
+    "smoke:admin": "scripts/smoke/admin-curl-flow.sh",
     "verify:multipart": "bun run scripts/real-large-s3-upload-selftest.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",

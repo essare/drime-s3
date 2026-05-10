@@ -120,27 +120,18 @@ export async function adminPutObject(
   W: number,
   bucket: string,
   key: string,
-  body: ReadableStream<Uint8Array> | ArrayBuffer | null,
-  contentType: string | null,
-  contentLength: number | null,
+  req: Request,
 ): Promise<PutObjectResult> {
   const folder = await findRootFolder(ctx, W, bucket);
   if (folder === undefined) return { kind: "no-such-bucket" };
 
   const u = new URL(`http://internal/${bucket}/${encodeKeyForUrl(key)}`);
-  const headers = new Headers();
-  if (contentType) headers.set("content-type", contentType);
-  if (contentLength !== null)
-    headers.set("content-length", String(contentLength));
-  headers.set("x-amz-content-sha256", "UNSIGNED-PAYLOAD");
-
-  const synthReq = new Request(u, { method: "PUT", headers, body });
   const res = await handleObjectRequest(ctx, {
     method: "PUT",
     bucket,
     key,
     url: u,
-    req: synthReq,
+    req,
     workspaceId: W,
   });
   if (res === null) {
@@ -153,7 +144,13 @@ export async function adminPutObject(
   }
   if (res.status === 200) {
     const etag = res.headers.get("etag") ?? '"unknown"';
-    return { kind: "ok", etag, size: contentLength ?? 0 };
+    const cl = req.headers.get("content-length");
+    const len = cl === null ? null : Number.parseInt(cl, 10);
+    return {
+      kind: "ok",
+      etag,
+      size: len !== null && Number.isFinite(len) ? len : 0,
+    };
   }
   return await translateS3XmlError(res);
 }
