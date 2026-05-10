@@ -4,6 +4,27 @@ import type { AppContext } from "../../server-context";
 import { etagFromEntryDescription } from "../tagging";
 import { type ListBucketEntry, listBucketResultXml } from "../xml";
 
+export type AdminObject = {
+  key: string;
+  size: number;
+  lastModified: string;
+  etag: string;
+};
+
+export type AdminListing = {
+  prefix: string;
+  delimiter: string;
+  objects: AdminObject[];
+  commonPrefixes: string[];
+  isTruncated: boolean;
+  nextToken: string | null;
+  // For XML-side reuse:
+  keyCount: number;
+  maxKeys: number;
+  continuationToken: string | null;
+  rawBucket: string;
+};
+
 const NOT_FOUND = Symbol("not-found");
 
 type ListCursor = {
@@ -166,7 +187,7 @@ function mergeRows(contents: ListBucketEntry[], prefixes: string[]): Row[] {
   return rows;
 }
 
-export async function handleListObjects(
+export async function listObjectsCore(
   ctx: AppContext,
   input: {
     bucket: string;
@@ -174,13 +195,12 @@ export async function handleListObjects(
     workspaceId: number;
     bucketFolderId: number;
   },
-): Promise<Response> {
+): Promise<AdminListing> {
   const { bucket, url, workspaceId: W, bucketFolderId } = input;
   const sp = url.searchParams;
   const prefix = sp.get("prefix") ?? "";
   const delimiter = sp.get("delimiter") ?? "";
-  const listType = sp.get("list-type");
-  const isV2 = listType === "2";
+  const tokenIn = sp.get("continuation-token");
 
   const maxKeysRaw = sp.get("max-keys") ?? sp.get("maxkeys");
   let maxKeys = 1000;
@@ -203,22 +223,18 @@ export async function handleListObjects(
       folderPath,
     );
     if (resolved === NOT_FOUND) {
-      const xml = listBucketResultXml({
-        name: bucket,
+      return {
         prefix,
+        delimiter,
+        objects: [],
+        commonPrefixes: [],
+        isTruncated: false,
+        nextToken: null,
+        continuationToken: tokenIn ?? null,
         keyCount: 0,
         maxKeys,
-        isTruncated: false,
-        contents: [],
-        commonPrefixes: [],
-        ...(isV2
-          ? { continuationToken: sp.get("continuation-token") ?? undefined }
-          : {}),
-      });
-      return new Response(xml, {
-        status: 200,
-        headers: { "Content-Type": "application/xml" },
-      });
+        rawBucket: bucket,
+      };
     }
     folderId = resolved;
     basePrefix = `${folderPath}/`;
@@ -236,7 +252,6 @@ export async function handleListObjects(
   }
 
   const rows = mergeRows(contents, prefixes);
-  const tokenIn = sp.get("continuation-token");
   let start = 0;
   const decoded = decodeToken(tokenIn);
   const dNorm = delimiter;
@@ -263,7 +278,7 @@ export async function handleListObjects(
     }
   }
 
-  const nextToken = truncated
+  const nextTokenEnc = truncated
     ? encodeToken({
         v: 1,
         o: nextOffset,
@@ -273,18 +288,59 @@ export async function handleListObjects(
       })
     : undefined;
 
-  const xml = listBucketResultXml({
-    name: bucket,
+  const objects: AdminObject[] = outContents.map((c) => ({
+    key: c.Key,
+    size: c.Size,
+    lastModified: c.LastModified,
+    etag: c.ETag,
+  }));
+
+  return {
     prefix,
+    delimiter,
+    objects,
+    commonPrefixes: outPrefixes.map((p) => p.Prefix),
+    isTruncated: truncated,
+    nextToken: nextTokenEnc ?? null,
+    continuationToken: tokenIn ?? null,
     keyCount: page.length,
     maxKeys,
-    isTruncated: truncated,
-    contents: outContents,
-    commonPrefixes: outPrefixes,
+    rawBucket: bucket,
+  };
+}
+
+export async function handleListObjects(
+  ctx: AppContext,
+  input: {
+    bucket: string;
+    url: URL;
+    workspaceId: number;
+    bucketFolderId: number;
+  },
+): Promise<Response> {
+  const r = await listObjectsCore(ctx, input);
+  const isV2 = input.url.searchParams.get("list-type") === "2";
+
+  const contents: ListBucketEntry[] = r.objects.map((o) => ({
+    Key: o.key,
+    LastModified: o.lastModified,
+    ETag: o.etag,
+    Size: o.size,
+    StorageClass: "STANDARD",
+  }));
+
+  const xml = listBucketResultXml({
+    name: r.rawBucket,
+    prefix: r.prefix,
+    keyCount: r.keyCount,
+    maxKeys: r.maxKeys,
+    isTruncated: r.isTruncated,
+    contents,
+    commonPrefixes: r.commonPrefixes.map((Prefix) => ({ Prefix })),
     ...(isV2
       ? {
-          continuationToken: tokenIn ?? undefined,
-          nextContinuationToken: nextToken,
+          continuationToken: r.continuationToken ?? undefined,
+          nextContinuationToken: r.nextToken ?? undefined,
         }
       : {}),
   });

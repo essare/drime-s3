@@ -30,10 +30,16 @@ export type ServerConfig = {
   port: number;
 };
 
+export type WebUiConfig = {
+  password: string;
+  sessionSecret: string;
+};
+
 export type AppConfig = {
   s3: S3AuthConfig;
   drime: DrimeConfig;
   server: ServerConfig;
+  webUi: WebUiConfig;
   insecure: boolean;
 };
 
@@ -62,6 +68,7 @@ function defaultConfig(): AppConfig {
       host: "127.0.0.1",
       port: 8081,
     },
+    webUi: { password: "", sessionSecret: "" },
     insecure: false,
   };
 }
@@ -69,6 +76,15 @@ function defaultConfig(): AppConfig {
 function pickNonEmptyString(v: unknown): string | undefined {
   if (typeof v === "string" && v.length > 0) return v;
   return undefined;
+}
+
+function parseSessionSecret(raw: string): string {
+  if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length < 32) {
+    throw new ConfigError(
+      "Invalid WEB_UI_SESSION_SECRET: expected hex string with at least 32 characters (16 bytes).",
+    );
+  }
+  return raw.toLowerCase();
 }
 
 function parseInsecureEnv(): boolean {
@@ -131,6 +147,18 @@ function applyToml(cfg: AppConfig, root: TomlRoot): void {
       cfg.server.port = port;
     }
   }
+  const webUi =
+    (root as Record<string, unknown>).web_ui ??
+    (root as Record<string, unknown>).webUi;
+  if (webUi && typeof webUi === "object") {
+    const w = webUi as Record<string, unknown>;
+    const pwd = pickNonEmptyString(w.password);
+    const sec =
+      pickNonEmptyString(w.session_secret) ??
+      pickNonEmptyString(w.sessionSecret);
+    if (pwd !== undefined) cfg.webUi.password = pwd;
+    if (sec !== undefined) cfg.webUi.sessionSecret = parseSessionSecret(sec);
+  }
 }
 
 function applyEnv(cfg: AppConfig): void {
@@ -174,6 +202,12 @@ function applyEnv(cfg: AppConfig): void {
     }
     cfg.server.port = n;
   }
+
+  const pwd = pickNonEmptyString(process.env.WEB_UI_PASSWORD);
+  if (pwd !== undefined) cfg.webUi.password = pwd;
+
+  const sec = pickNonEmptyString(process.env.WEB_UI_SESSION_SECRET);
+  if (sec !== undefined) cfg.webUi.sessionSecret = parseSessionSecret(sec);
 
   cfg.insecure = parseInsecureEnv();
 }
