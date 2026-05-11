@@ -8,6 +8,10 @@ import {
   createAwsChunkedPayloadTransform,
 } from "../../auth/chunked-decoder";
 import { normalizePathKey } from "../../cache/folder-paths";
+import {
+  getMultipartPutThresholdBytes,
+  uploadFileViaInternalMultipart,
+} from "../../drime/multipart-upload";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
@@ -122,7 +126,12 @@ function parseUploadFileEntryId(raw: unknown): number | undefined {
 async function writeRequestBodyToTemp(
   req: Request,
   ctx: AppContext,
-): Promise<{ tmpDir: string; tmpPath: string; md5Hex: string }> {
+): Promise<{
+  tmpDir: string;
+  tmpPath: string;
+  md5Hex: string;
+  totalSize: number;
+}> {
   const hash = createHash("md5");
   const tmpDir = await mkdtemp(join(tmpdir(), "drime-s3-put-"));
   const tmpPath = join(tmpDir, "body.bin");
@@ -130,7 +139,7 @@ async function writeRequestBodyToTemp(
   if (!rawBody) {
     const fh = await open(tmpPath, "w", 0o600);
     await fh.close();
-    return { tmpDir, tmpPath, md5Hex: hash.digest("hex") };
+    return { tmpDir, tmpPath, md5Hex: hash.digest("hex"), totalSize: 0 };
   }
   const isAwsChunked =
     req.headers.get("x-amz-content-sha256") ===
@@ -141,6 +150,7 @@ async function writeRequestBodyToTemp(
       )
     : rawBody;
 
+  let totalSize = 0;
   const reader = stream.getReader();
   const fh = await open(tmpPath, "w", 0o600);
   try {
@@ -150,13 +160,14 @@ async function writeRequestBodyToTemp(
       if (value !== undefined && value.byteLength > 0) {
         hash.update(value);
         await fh.write(value);
+        totalSize += value.byteLength;
       }
     }
   } finally {
     await fh.close();
     reader.releaseLock();
   }
-  return { tmpDir, tmpPath, md5Hex: hash.digest("hex") };
+  return { tmpDir, tmpPath, md5Hex: hash.digest("hex"), totalSize };
 }
 
 function parseCopySourceHeader(
@@ -281,7 +292,24 @@ async function handlePutCopyObject(
         "Content-Type": "application/xml",
       },
     });
-  } catch {
+  } catch (e) {
+    ctx.logger.error(
+      {
+        err: e,
+        srcBucket: parsed.bucket,
+        srcKey: parsed.key,
+        destBucket,
+        destKey,
+      },
+      "PUT copy object failed",
+    );
+    if (ctx.config.insecure && e instanceof Error) {
+      return xmlErr(
+        500,
+        "InternalError",
+        `Copy failed: ${e.message.slice(0, 800)}`,
+      );
+    }
     return xmlErr(500, "InternalError", "Copy failed.");
   } finally {
     if (tmpDir) {
@@ -461,16 +489,57 @@ export async function handleObjectRequest(
       ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
       : trimmed;
     const relativePath = parentId === bucketRootId ? trimmed : basename;
+    const extension = basename.includes(".")
+      ? basename.slice(basename.lastIndexOf(".") + 1).toLowerCase()
+      : "";
 
     let tmpDir = "";
     try {
       const spooled = await writeRequestBodyToTemp(req, ctx);
       tmpDir = spooled.tmpDir;
-      const { tmpPath, md5Hex } = spooled;
+      const { tmpPath, md5Hex, totalSize } = spooled;
 
       if (resolved.kind === "file" || resolved.kind === "folder") {
         await ctx.drime.deleteEntriesForever([resolved.entry.id]);
         ctx.listCache.invalidate(resolved.parentFolderId);
+      }
+
+      // Drime's `/uploads` endpoint sits behind a Cloudflare 100 MiB
+      // request-size cap. For larger bodies, fall back to Drime's S3
+      // multipart protocol (presigned per-part PUTs to storage, no cap).
+      if (totalSize > getMultipartPutThresholdBytes()) {
+        const multipart = await uploadFileViaInternalMultipart(ctx, {
+          tmpPath,
+          totalSize,
+          filename: basename,
+          relativePath,
+          extension,
+          parentId,
+          workspaceId: W,
+        });
+        // Persist the composite ETag so subsequent GET/HEAD/list responses
+        // return the same value as the upload response.
+        if (multipart.fileEntryId !== undefined) {
+          try {
+            await ctx.drime.updateFileEntryDescription(
+              multipart.fileEntryId,
+              buildObjectDescription(
+                multipart.etag.replace(/^"|"$/g, ""),
+                req.headers.get("x-amz-tagging"),
+              ),
+            );
+          } catch {
+            /* optional Drime feature */
+          }
+        }
+        ctx.listCache.invalidate(parentId);
+        return new Response("", {
+          status: 200,
+          headers: {
+            ETag: multipart.etag,
+            "Content-Length": "0",
+          },
+        });
       }
 
       const raw = await ctx.drime.uploadFile({
@@ -502,6 +571,17 @@ export async function handleObjectRequest(
     } catch (e) {
       if (e instanceof ChunkedPayloadError) {
         return xmlErr(400, "InvalidRequest", e.message);
+      }
+      ctx.logger.error(
+        { err: e, bucket, key, parentId, relativePath },
+        "PUT object failed",
+      );
+      // In insecure (dev) mode, surface the upstream error so the operator can
+      // diagnose without grepping logs. Production callers still see the
+      // generic message to avoid leaking internals.
+      if (ctx.config.insecure && e instanceof Error) {
+        const detail = e.message.slice(0, 800);
+        return xmlErr(500, "InternalError", `Upload failed: ${detail}`);
       }
       return xmlErr(500, "InternalError", "Upload failed.");
     } finally {

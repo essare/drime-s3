@@ -78,3 +78,122 @@ describe("ListTtlCache single-flight", () => {
     expect(fetchCount).toBe(2);
   });
 });
+
+const folderEntry = (id: number, name: string): FileEntry => ({
+  id,
+  name,
+  parent_id: null,
+  is_folder: true,
+  file_size: 0,
+  hash: null,
+  mime: null,
+  updated_at: null,
+  description: null,
+  url: null,
+});
+
+describe("ListTtlCache addEntry / removeEntryById", () => {
+  test("addEntry on empty key is a no-op (next read fetches fresh)", async () => {
+    const cache = new ListTtlCache();
+    cache.addEntry(null, folderEntry(1, "alpha"));
+
+    let fetchCount = 0;
+    const fetcher = async (): Promise<FileEntry[]> => {
+      fetchCount += 1;
+      return [folderEntry(2, "beta")];
+    };
+    const entries = await cache.getOrFetch(null, fetcher);
+    expect(fetchCount).toBe(1);
+    expect(entries.map((e) => e.name)).toEqual(["beta"]);
+  });
+
+  test("addEntry on cached key appends without refetching", async () => {
+    const cache = new ListTtlCache();
+    let fetchCount = 0;
+    const fetcher = async (): Promise<FileEntry[]> => {
+      fetchCount += 1;
+      return [folderEntry(1, "alpha")];
+    };
+    await cache.getOrFetch(null, fetcher);
+    cache.addEntry(null, folderEntry(2, "beta"));
+
+    const entries = await cache.getOrFetch(null, fetcher);
+    expect(fetchCount).toBe(1);
+    expect(entries.map((e) => e.name).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  test("addEntry replaces an entry with the same id (idempotent)", async () => {
+    const cache = new ListTtlCache();
+    const fetcher = async (): Promise<FileEntry[]> => [
+      folderEntry(1, "alpha"),
+    ];
+    await cache.getOrFetch(null, fetcher);
+    cache.addEntry(null, { ...folderEntry(1, "alpha"), name: "renamed" });
+
+    const entries = await cache.getOrFetch(null, fetcher);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.name).toBe("renamed");
+  });
+
+  test("addEntry refreshes TTL so the seeded entry survives the original window", async () => {
+    const cache = new ListTtlCache();
+    let fetchCount = 0;
+    let upstream: FileEntry[] = [folderEntry(1, "alpha")];
+    const fetcher = async (): Promise<FileEntry[]> => {
+      fetchCount += 1;
+      return upstream;
+    };
+
+    const t0 = Date.now();
+    let nowSpy = t0;
+    const realNow = Date.now;
+    Date.now = () => nowSpy;
+    try {
+      await cache.getOrFetch(null, fetcher);
+      // Fast-forward 4 s (still under 5 s TTL); seed at this moment.
+      nowSpy = t0 + 4000;
+      cache.addEntry(null, folderEntry(2, "beta"));
+      // Original TTL would have expired at t0 + 5 s. Read at t0 + 8 s should
+      // still hit cache because addEntry refreshed the timestamp.
+      nowSpy = t0 + 8000;
+      // Upstream still hasn't propagated the new entry — eventual consistency.
+      upstream = [folderEntry(1, "alpha")];
+      const entries = await cache.getOrFetch(null, fetcher);
+      expect(fetchCount).toBe(1);
+      expect(entries.map((e) => e.name).sort()).toEqual(["alpha", "beta"]);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("removeEntryById drops the matching entry from the cached listing", async () => {
+    const cache = new ListTtlCache();
+    let fetchCount = 0;
+    const fetcher = async (): Promise<FileEntry[]> => {
+      fetchCount += 1;
+      return [folderEntry(1, "alpha"), folderEntry(2, "beta")];
+    };
+    await cache.getOrFetch(null, fetcher);
+    cache.removeEntryById(null, 1);
+
+    const entries = await cache.getOrFetch(null, fetcher);
+    expect(fetchCount).toBe(1);
+    expect(entries.map((e) => e.id)).toEqual([2]);
+  });
+
+  test("removeEntryById on missing id is a no-op", async () => {
+    const cache = new ListTtlCache();
+    const fetcher = async (): Promise<FileEntry[]> => [folderEntry(1, "alpha")];
+    await cache.getOrFetch(null, fetcher);
+    cache.removeEntryById(null, 999);
+    const entries = await cache.getOrFetch(null, fetcher);
+    expect(entries.map((e) => e.id)).toEqual([1]);
+  });
+
+  test("removeEntryById on empty key is a no-op", () => {
+    const cache = new ListTtlCache();
+    expect(() => {
+      cache.removeEntryById(null, 1);
+    }).not.toThrow();
+  });
+});

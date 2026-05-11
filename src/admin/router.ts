@@ -20,6 +20,7 @@ import {
   handleLogin,
   handleLogout,
 } from "./handlers/session";
+import { handleStatsAdmin } from "./handlers/stats";
 import { handleStatus } from "./handlers/status";
 
 export async function dispatchAdmin(
@@ -54,6 +55,8 @@ export async function dispatchAdmin(
   if (sessionErr) return sessionErr;
 
   if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
+  if (method === "GET" && path === "/_admin/stats")
+    return handleStatsAdmin(ctx);
   if (method === "POST" && path === "/_admin/init") return handleInit(ctx);
 
   if (path === "/_admin/buckets" && method === "GET")

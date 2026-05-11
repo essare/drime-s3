@@ -85,6 +85,73 @@ describe("/_admin/buckets", () => {
     }
   });
 
+  test("POST seeds the root list cache so the new bucket is immediately findable without re-listing upstream", async () => {
+    const setup = await startAdmin({ password: "hunter2-hunter2" });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request(`${ORIG}/_admin/buckets`, {
+          method: "POST",
+          headers: authedHeaders(cookie),
+          body: JSON.stringify({ name: "fresh-bucket" }),
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      // If the fix is in place, listCache(null) holds the new entry — calling
+      // getOrFetch with a throwing fetcher must succeed (cache hit). Before
+      // the fix this would throw because adminCreateBucket invalidated the
+      // entry.
+      const cached = await setup.ctx.listCache.getOrFetch(null, async () => {
+        throw new Error("upstream-not-expected");
+      });
+      const names = cached
+        .filter((e) => e.is_folder)
+        .map((e) => e.name)
+        .sort();
+      expect(names).toContain("fresh-bucket");
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("DELETE removes the bucket from the cached root listing", async () => {
+    const setup = await startAdmin({
+      password: "hunter2-hunter2",
+      seedRootFolders: ["drop-me", "keep-me"],
+    });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      // Warm the cache with a list call.
+      const listed = await setup.call(
+        new Request(`${ORIG}/_admin/buckets`, {
+          headers: authedHeaders(cookie),
+        }),
+      );
+      expect(listed.status).toBe(200);
+
+      const del = await setup.call(
+        new Request(`${ORIG}/_admin/buckets/drop-me`, {
+          method: "DELETE",
+          headers: authedHeaders(cookie),
+        }),
+      );
+      expect(del.status).toBe(204);
+
+      // The cached root listing should reflect the delete without a refetch.
+      const cached = await setup.ctx.listCache.getOrFetch(null, async () => {
+        throw new Error("upstream-not-expected");
+      });
+      const names = cached
+        .filter((e) => e.is_folder)
+        .map((e) => e.name)
+        .sort();
+      expect(names).toEqual(["keep-me"]);
+    } finally {
+      setup.cleanup();
+    }
+  });
+
   test("DELETE empty bucket → 204; DELETE missing bucket → 404", async () => {
     const setup = await startAdmin({
       password: "hunter2-hunter2",

@@ -1,4 +1,5 @@
 import { normalizePathKey } from "../cache/folder-paths";
+import { type FileEntry, fromFileEntryJson } from "../drime/types";
 import {
   findRootFolder,
   parseCreateFolderResponse,
@@ -29,6 +30,103 @@ export async function adminListBuckets(
     }));
 }
 
+export type BucketStat = { name: string; bytes: number; objects: number };
+
+export type WorkspaceStats = {
+  buckets: number;
+  totalBytes: number;
+  totalObjects: number;
+  perBucket: BucketStat[];
+};
+
+/**
+ * Recursively sum file sizes and object counts under `folderId`. Uses
+ * `listCache` so concurrent walks coalesce on the same parent and short-TTL
+ * repeats are free. Iterative (BFS) to avoid stack growth on deep trees.
+ */
+async function walkFolderSize(
+  ctx: AppContext,
+  W: number,
+  folderId: number,
+): Promise<{ bytes: number; objects: number }> {
+  let bytes = 0;
+  let objects = 0;
+  const queue: number[] = [folderId];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (id === undefined) break;
+    const entries = await ctx.listCache.getOrFetch(id, () =>
+      ctx.drime.listFolder(id, W),
+    );
+    for (const e of entries) {
+      if (e.is_folder) {
+        queue.push(e.id);
+      } else {
+        bytes += e.file_size;
+        objects += 1;
+      }
+    }
+  }
+  return { bytes, objects };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const lanes = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(
+    Array.from({ length: lanes }, async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= items.length) return;
+        const item = items[idx];
+        if (item === undefined) return;
+        out[idx] = await fn(item);
+      }
+    }),
+  );
+  return out;
+}
+
+/**
+ * Compute workspace-wide stats: total bucket count, total bytes, total
+ * objects, and per-bucket breakdown. Buckets are walked with bounded
+ * concurrency to avoid hammering Drime when the workspace has many buckets.
+ */
+export async function adminGetStats(
+  ctx: AppContext,
+  W: number,
+): Promise<WorkspaceStats> {
+  const root = await ctx.listCache.getOrFetch(null, () =>
+    ctx.drime.listFolder(null, W),
+  );
+  const bucketFolders = root.filter(
+    (e) => e.is_folder && isValidBucketName(e.name),
+  );
+  const perBucket = await mapWithConcurrency(bucketFolders, 4, async (f) => {
+    const { bytes, objects } = await walkFolderSize(ctx, W, f.id);
+    return { name: f.name, bytes, objects } satisfies BucketStat;
+  });
+  perBucket.sort((a, b) => a.name.localeCompare(b.name));
+  let totalBytes = 0;
+  let totalObjects = 0;
+  for (const b of perBucket) {
+    totalBytes += b.bytes;
+    totalObjects += b.objects;
+  }
+  return {
+    buckets: bucketFolders.length,
+    totalBytes,
+    totalObjects,
+    perBucket,
+  };
+}
+
+
 export type CreateBucketResult =
   | { kind: "ok" }
   | { kind: "invalid-name" }
@@ -44,11 +142,44 @@ export async function adminCreateBucket(
   if (existing !== undefined) return { kind: "exists" };
   const raw = await ctx.drime.createFolder(name, { workspaceId: W });
   const id = parseCreateFolderResponse(raw);
-  if (id !== undefined) {
-    ctx.folderCache.set(normalizePathKey(name), id);
+  if (id === undefined) {
+    // Couldn't extract the folder id; fall back to invalidate. The dashboard
+    // may briefly show "Bucket not found" until upstream propagation, but
+    // that's preferable to seeding the wrong id.
+    ctx.listCache.invalidate(null);
+    return { kind: "ok" };
   }
-  ctx.listCache.invalidate(null);
+  ctx.folderCache.set(normalizePathKey(name), id);
+  // Drime's folder listing is eventually consistent: a list issued moments
+  // after createFolder may not include the new folder. Seed the cached root
+  // listing with the freshly created entry so subsequent reads (e.g. the UI
+  // navigating to /buckets/<name> right after creation) see it immediately.
+  ctx.listCache.addEntry(null, buildSeedFolderEntry(raw, id, name));
   return { kind: "ok" };
+}
+
+function buildSeedFolderEntry(
+  raw: unknown,
+  id: number,
+  name: string,
+): FileEntry {
+  const folder = (raw as { folder?: unknown } | null)?.folder;
+  const parsed = fromFileEntryJson(folder ?? null);
+  if (parsed.id === id && parsed.name === name && parsed.is_folder) {
+    return parsed;
+  }
+  return {
+    id,
+    name,
+    parent_id: null,
+    is_folder: true,
+    file_size: 0,
+    hash: null,
+    mime: null,
+    updated_at: new Date().toISOString(),
+    description: null,
+    url: null,
+  };
 }
 
 export type DeleteBucketResult =
@@ -66,7 +197,10 @@ export async function adminDeleteBucket(
   const children = await ctx.drime.listFolder(folder.id, W);
   if (children.length > 0) return { kind: "not-empty" };
   await ctx.drime.deleteEntriesForever([folder.id]);
-  ctx.listCache.invalidate(null);
+  // Splice the deleted bucket out of the cached root listing instead of
+  // invalidating it, so the next list isn't subject to upstream eventual
+  // consistency (which can briefly resurrect the deleted bucket).
+  ctx.listCache.removeEntryById(null, folder.id);
   ctx.listCache.invalidate(folder.id);
   ctx.folderCache.evictPrefix(normalizePathKey(name));
   return { kind: "ok" };

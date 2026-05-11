@@ -21,6 +21,36 @@ export class ListTtlCache {
     this.cache.delete(cacheKey(folderId));
   }
 
+  /**
+   * Splice an entry into a cached listing for read-your-writes semantics under
+   * upstream eventual consistency. Replaces an existing entry with the same id
+   * (idempotent) or appends a new one. Refreshes the cache timestamp so the
+   * seeded entry survives the original TTL window. No-op when the listing is
+   * not currently cached — the next read will fetch fresh from upstream.
+   */
+  addEntry(folderId: number | null, entry: FileEntry): void {
+    const cached = this.cache.get(cacheKey(folderId));
+    if (!cached) return;
+    const idx = cached.entries.findIndex((e) => e.id === entry.id);
+    if (idx >= 0) cached.entries[idx] = entry;
+    else cached.entries.push(entry);
+    cached.ts = Date.now();
+  }
+
+  /**
+   * Remove an entry by id from a cached listing for read-your-writes semantics
+   * after a delete. No-op when the listing is not cached or the id is absent.
+   * Refreshes the cache timestamp on hit so the post-delete view survives the
+   * original TTL window.
+   */
+  removeEntryById(folderId: number | null, id: number): void {
+    const cached = this.cache.get(cacheKey(folderId));
+    if (!cached) return;
+    const before = cached.entries.length;
+    cached.entries = cached.entries.filter((e) => e.id !== id);
+    if (cached.entries.length !== before) cached.ts = Date.now();
+  }
+
   private trimIfNeeded(): void {
     while (this.cache.size > MAX_CACHED_KEYS) {
       const first = this.cache.keys().next().value;
