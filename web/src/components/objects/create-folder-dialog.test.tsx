@@ -211,6 +211,38 @@ describe("CreateFolderDialog", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows non-field errors as an inline Alert (not a toast)", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "WorkspaceUnavailable",
+            message:
+              "Gateway workspace not initialized — call POST /_admin/init.",
+          },
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <CreateFolderDialog
+        open={true}
+        onOpenChange={() => {}}
+        bucket="docs"
+        prefix=""
+        onSuccess={() => {}}
+      />,
+      { wrapper: withProviders(client) },
+    );
+    await userEvent.type(screen.getByLabelText(/folder name/i), "reports");
+    await userEvent.click(screen.getByRole("button", { name: /create/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/workspace not initialized/i);
+  });
+
   it("shows the file-specific 409 message", async () => {
     fetchMock.mockResolvedValue(
       new Response(

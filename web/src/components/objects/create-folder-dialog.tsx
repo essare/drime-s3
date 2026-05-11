@@ -1,7 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,10 +51,14 @@ export function CreateFolderDialog({
   });
 
   const mutation = useCreateFolder();
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
   function handleOpenChange(next: boolean) {
     onOpenChange(next);
-    if (!next) form.reset({ name: "" });
+    if (!next) {
+      form.reset({ name: "" });
+      setGeneralError(null);
+    }
   }
 
   return (
@@ -70,6 +76,7 @@ export function CreateFolderDialog({
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit((values) => {
+              setGeneralError(null);
               mutation.mutate(
                 { bucket, prefix, name: values.name },
                 {
@@ -92,10 +99,10 @@ export function CreateFolderDialog({
                       } else if (e.status === 400) {
                         form.setError("name", { message: e.message });
                       } else {
-                        toast.error(e.message);
+                        setGeneralError(e.message);
                       }
                     } else {
-                      toast.error("Network error creating folder");
+                      setGeneralError("Network error creating folder");
                     }
                   },
                 },
@@ -103,6 +110,11 @@ export function CreateFolderDialog({
             })}
             className="space-y-4"
           >
+            {generalError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{generalError}</AlertDescription>
+              </Alert>
+            ) : null}
             <FormField
               control={form.control}
               name="name"
