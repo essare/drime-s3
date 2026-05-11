@@ -10,56 +10,47 @@ The server is written in **TypeScript** and runs on **[Bun](https://bun.sh)**. R
 
 Prebuilt images are published on **Docker Hub** (`docker.io/essayoub/drime-s3`) and **GitHub Container Registry** (`ghcr.io/essare/drime-s3`). Rolling builds use tags such as `main` and `sha-<short>`; stable releases use semver tags (for example `v1.2.3` and `1.2.3`).
 
-Create **`docker-compose.yml`** in an empty directory (or use the same file from the repository root if you cloned the project) with the following contents. Put a **`.env`** file in that directory; variables are listed in step 1.
+Create **`docker-compose.yml`** (or use the copy in the repository root) and replace the placeholder strings under **`environment`** with your real values. No separate **`.env`** file is required for this layout.
 
 ```yaml
-# drime-s3 — single-service stack. Create `.env` next to this file, then:
-#   docker compose run --rm drime-s3 init   # once per Drime workspace name
+# drime-s3 — edit `environment` values below, then:
+#   docker compose run --rm drime-s3 init
 #   docker compose up -d
 
 services:
   drime-s3:
-    image: ${DRIME_S3_IMAGE:-docker.io/essayoub/drime-s3:main}
+    image: docker.io/essayoub/drime-s3:main
     container_name: drime-s3
     restart: unless-stopped
     ports:
-      - "${DRIME_S3_PORT:-8081}:8081"
+      - "8081:8081"
     environment:
-      DRIME_API_KEY: ${DRIME_API_KEY:?Set DRIME_API_KEY in .env (see .env.example)}
-      DRIME_API_BASE_URL: ${DRIME_API_BASE_URL:-https://app.drime.cloud/api/v1}
-      DRIME_GATEWAY_WORKSPACE_NAME: ${DRIME_GATEWAY_WORKSPACE_NAME:-drime-s3}
-      DRIME_GATEWAY_WORKSPACE_ID: ${DRIME_GATEWAY_WORKSPACE_ID:-}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
-      WEB_UI_PASSWORD: ${WEB_UI_PASSWORD:?Set WEB_UI_PASSWORD in .env}
-      WEB_UI_SESSION_SECRET: ${WEB_UI_SESSION_SECRET:?Set WEB_UI_SESSION_SECRET in .env (hex, 32+ chars)}
-      DRIME_S3_INSECURE: ${DRIME_S3_INSECURE:-}
+      DRIME_API_KEY: "YOUR_DRIME_API_TOKEN"
+      DRIME_API_BASE_URL: "https://app.drime.cloud/api/v1"
+      DRIME_GATEWAY_WORKSPACE_NAME: "drime-s3"
+      S3_ACCESS_KEY: "YOUR_S3_ACCESS_KEY"
+      S3_SECRET_KEY: "YOUR_S3_SECRET_KEY"
+      WEB_UI_PASSWORD: "YOUR_WEB_UI_PASSWORD"
+      WEB_UI_SESSION_SECRET: "YOUR_HEX_SESSION_SECRET_AT_LEAST_32_CHARS"
 ```
 
-### 1. Configure environment
+### 1. Configure `environment`
 
-If you cloned the repo, you can start from the tracked template:
-
-```bash
-cp .env.example .env
-```
-
-Otherwise create **`.env`** manually in the same directory as `docker-compose.yml`. Set at least **`DRIME_API_KEY`**, **`S3_ACCESS_KEY`**, **`S3_SECRET_KEY`**, **`WEB_UI_PASSWORD`**, and **`WEB_UI_SESSION_SECRET`** (hex string, at least 32 characters).
-
-| Variable | Purpose |
-|----------|---------|
+| Key | Purpose |
+|-----|---------|
 | `DRIME_API_KEY` | Drime API bearer token |
-| `DRIME_API_BASE_URL` | Optional; default `https://app.drime.cloud/api/v1` |
-| `DRIME_GATEWAY_WORKSPACE_NAME` | Workspace whose root folders map to buckets (default `drime-s3`) |
-| `DRIME_GATEWAY_WORKSPACE_ID` | Optional; pin workspace id and skip discovery |
+| `DRIME_API_BASE_URL` | Drime API base URL (default shown above) |
+| `DRIME_GATEWAY_WORKSPACE_NAME` | Workspace whose root folders map to buckets |
 | `S3_ACCESS_KEY` | Access key id for Sig V4 (use with AWS CLI / SDKs) |
 | `S3_SECRET_KEY` | Secret key for Sig V4 |
 | `WEB_UI_PASSWORD` | Password for the browser admin UI |
-| `WEB_UI_SESSION_SECRET` | Hex string, **at least 32 characters** (16 bytes), for signed cookies |
-| `DRIME_S3_IMAGE` | Optional; override image (default `docker.io/essayoub/drime-s3:main`) |
-| `DRIME_S3_PORT` | Optional; host port published to the container’s `8081` (default `8081`) |
+| `WEB_UI_SESSION_SECRET` | Hex string, **at least 32 characters** (16 bytes); e.g. `openssl rand -hex 32` |
 
-Run with **Sig V4 enabled** (default): do **not** set `DRIME_S3_INSECURE` in production. For **local or lab use only**, you may set `DRIME_S3_INSECURE=1` in `.env` so missing S3 keys are auto-generated; **never** expose that on the public internet.
+Optional: add **`DRIME_GATEWAY_WORKSPACE_ID`** under `environment` with a numeric string to pin the workspace. Change **`image`** to another tag or registry (`ghcr.io/essare/drime-s3:main`, a semver tag, etc.). Change the host side of **`ports`** (e.g. `9000:8081`) if `8081` is already taken on the host.
+
+Treat **`docker-compose.yml` like a secret** once it holds real tokens: do not commit it to a public repository with production values (use a private override file, secret store, or CI variables instead).
+
+Run with **Sig V4 enabled** (default): omit **`DRIME_S3_INSECURE`**. For **local or lab use only**, add `DRIME_S3_INSECURE: "1"` under `environment` so missing S3 keys are auto-generated; **never** expose that on the public internet.
 
 ### 2. Initialize the workspace (once per Drime account / workspace name)
 
@@ -73,7 +64,7 @@ docker compose run --rm drime-s3 init
 docker compose up -d
 ```
 
-The gateway listens on **`http://127.0.0.1:${DRIME_S3_PORT:-8081}`** on the host. Health: `GET /_health`. Admin UI: **`http://127.0.0.1:${DRIME_S3_PORT:-8081}/_ui/`** (use your host and published port if they differ).
+The gateway listens on **`http://127.0.0.1:8081`** on the host by default (match the left side of `ports:` if you changed it). Health: `GET /_health`. Admin UI: **`http://127.0.0.1:8081/_ui/`** (adjust host and port to match your `ports:` mapping).
 
 Logs:
 
@@ -91,7 +82,7 @@ docker compose down
 
 ## AWS CLI examples
 
-Point the AWS CLI at drime-s3 with **`--endpoint-url`** and use the same **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** as in your `.env`. The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
+Point the AWS CLI at drime-s3 with **`--endpoint-url`** and use the same **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** as in `docker-compose.yml`. The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
 
 For **localhost** and custom endpoints, path-style addressing is reliable:
 
