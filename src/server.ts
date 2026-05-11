@@ -26,7 +26,11 @@ function etagMd5ShapeOk(etagHeader: string): boolean {
 }
 
 /** Safe Sig V4 hints + optional full response header map for debugging third-party clients. */
-function s3TraceExtras(req: Request, res: Response, pathname: string): Record<string, unknown> {
+function s3TraceExtras(
+  req: Request,
+  res: Response,
+  pathname: string,
+): Record<string, unknown> {
   const etagHdr = res.headers.get("etag") ?? "";
   const out: Record<string, unknown> = {
     host: req.headers.get("host") ?? "",

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { FileEntry } from "../../../src/drime/types";
-import { etagFromFileEntry, entryHasStrongContentEtag } from "../../../src/s3/tagging";
+import {
+  entryHasStrongContentEtag,
+  etagFromFileEntry,
+} from "../../../src/s3/tagging";
 
 function entry(partial: Partial<FileEntry>): FileEntry {
   return {

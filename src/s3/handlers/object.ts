@@ -466,11 +466,7 @@ export async function handleObjectRequest(
     const maxBuf = contentEtagBufferMaxBytes();
     const sz = entry.file_size ?? 0;
     const bufferBody =
-      !range &&
-      upstream.status === 200 &&
-      !strong &&
-      sz >= 0 &&
-      sz <= maxBuf;
+      !range && upstream.status === 200 && !strong && sz >= 0 && sz <= maxBuf;
 
     if (bufferBody) {
       const buf = Buffer.from(await upstream.arrayBuffer());
@@ -481,7 +477,7 @@ export async function handleObjectRequest(
       headers["Content-Length"] = String(buf.length);
       headers["Accept-Ranges"] = "bytes";
       headers["Last-Modified"] = formatHttpDate(entry.updated_at);
-      headers["ETag"] = `"${md5Hex}"`;
+      headers.ETag = `"${md5Hex}"`;
       return new Response(buf, { status: 200, headers });
     }
 
