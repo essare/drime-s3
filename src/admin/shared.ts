@@ -132,6 +132,13 @@ export type CreateBucketResult =
   | { kind: "invalid-name" }
   | { kind: "exists" };
 
+export type CreateFolderResult =
+  | { kind: "ok"; name: string; prefix: string; id: number }
+  | { kind: "no-such-bucket" }
+  | { kind: "no-such-prefix" }
+  | { kind: "invalid"; message: string }
+  | { kind: "exists"; existingKind: "file" | "folder" };
+
 export async function adminCreateBucket(
   ctx: AppContext,
   W: number,
@@ -158,7 +165,7 @@ export async function adminCreateBucket(
   return { kind: "ok" };
 }
 
-function buildSeedFolderEntry(
+export function buildSeedFolderEntry(
   raw: unknown,
   id: number,
   name: string,
