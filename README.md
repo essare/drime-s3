@@ -12,6 +12,8 @@ Prebuilt images are published on **Docker Hub** (`docker.io/essayoub/drime-s3`) 
 
 Create **`docker-compose.yml`** (or use the copy in the repository root) and replace the placeholder strings under **`environment`** with your real values. No separate **`.env`** file is required for this layout.
 
+**Where values come from:** **`DRIME_API_KEY`** is issued by **Drime** (your account). **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** are **not** from Drime or AWS—you **invent** them (any strong strings you keep secret). They are the username/password Sig V4 clients (AWS CLI, SDKs, other apps) use against *this* gateway only. **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** are also yours to define (session secret: long random hex).
+
 ```yaml
 # drime-s3 — edit `environment` values below, then:
 #   docker compose run --rm drime-s3 init
@@ -28,6 +30,7 @@ services:
       DRIME_API_KEY: "YOUR_DRIME_API_TOKEN"
       DRIME_API_BASE_URL: "https://app.drime.cloud/api/v1"
       DRIME_GATEWAY_WORKSPACE_NAME: "drime-s3"
+      # Pick any secret strings; clients use them for Sig V4 here — not from Drime or AWS
       S3_ACCESS_KEY: "YOUR_S3_ACCESS_KEY"
       S3_SECRET_KEY: "YOUR_S3_SECRET_KEY"
       WEB_UI_PASSWORD: "YOUR_WEB_UI_PASSWORD"
@@ -41,8 +44,8 @@ services:
 | `DRIME_API_KEY` | Drime API bearer token |
 | `DRIME_API_BASE_URL` | Drime API base URL (default shown above) |
 | `DRIME_GATEWAY_WORKSPACE_NAME` | Workspace whose root folders map to buckets |
-| `S3_ACCESS_KEY` | Access key id for Sig V4 (use with AWS CLI / SDKs) |
-| `S3_SECRET_KEY` | Secret key for Sig V4 |
+| `S3_ACCESS_KEY` | **You choose** this string; S3 clients send it as the access key id for Sig V4 to this gateway (not from Drime or AWS) |
+| `S3_SECRET_KEY` | **You choose** this string; paired secret for Sig V4 (not from Drime or AWS) |
 | `WEB_UI_PASSWORD` | Password for the browser admin UI |
 | `WEB_UI_SESSION_SECRET` | Hex string, **at least 32 characters** (16 bytes); e.g. `openssl rand -hex 32` |
 
@@ -82,13 +85,13 @@ docker compose down
 
 ## AWS CLI examples
 
-Point the AWS CLI at drime-s3 with **`--endpoint-url`** and use the same **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** as in `docker-compose.yml`. The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
+Point the AWS CLI at drime-s3 with **`--endpoint-url`** and set **`AWS_ACCESS_KEY_ID`** / **`AWS_SECRET_ACCESS_KEY`** to the **same `S3_ACCESS_KEY` and `S3_SECRET_KEY` values you chose** in `docker-compose.yml` (they are not looked up anywhere else). The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
 
 For **localhost** and custom endpoints, path-style addressing is reliable:
 
 ```bash
-export AWS_ACCESS_KEY_ID="your_S3_ACCESS_KEY"
-export AWS_SECRET_ACCESS_KEY="your_S3_SECRET_KEY"
+export AWS_ACCESS_KEY_ID="your_chosen_access_key"
+export AWS_SECRET_ACCESS_KEY="your_chosen_secret_key"
 export AWS_DEFAULT_REGION="drime"
 export AWS_EC2_METADATA_DISABLED="true"
 export AWS_USE_PATH_STYLE_ENDPOINT="true"
@@ -160,7 +163,7 @@ bun install --frozen-lockfile --cwd web
 - `DRIME_GATEWAY_WORKSPACE_NAME` — optional; default `drime-s3`.
 - `DRIME_S3_INSECURE=1` or `--insecure` — skips Sig V4 verification (**development only**).
 
-With Sig V4 enabled, set `S3_ACCESS_KEY` and `S3_SECRET_KEY` (or define `[s3]` in the config file below). For the admin UI in production-like mode, set `WEB_UI_PASSWORD` and `WEB_UI_SESSION_SECRET` (hex, at least 32 characters).
+With Sig V4 enabled, set **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** to strings **you choose** (they are only for this gateway, not from Drime or AWS), or define `[s3]` in the config file below. For the admin UI in production-like mode, set `WEB_UI_PASSWORD` and `WEB_UI_SESSION_SECRET` (hex, at least 32 characters).
 
 ### Initialize and serve
 

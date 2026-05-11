@@ -13,6 +13,7 @@ services:
       DRIME_API_KEY: "YOUR_DRIME_API_TOKEN"
       DRIME_API_BASE_URL: "https://app.drime.cloud/api/v1"
       DRIME_GATEWAY_WORKSPACE_NAME: "drime-s3"
+      # Pick any secret strings; clients use them for Sig V4 here — not from Drime or AWS
       S3_ACCESS_KEY: "YOUR_S3_ACCESS_KEY"
       S3_SECRET_KEY: "YOUR_S3_SECRET_KEY"
       WEB_UI_PASSWORD: "YOUR_WEB_UI_PASSWORD"
