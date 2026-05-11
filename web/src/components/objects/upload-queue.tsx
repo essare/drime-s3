@@ -13,11 +13,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { formatBytes } from "@/lib/format";
-import type {
-  UploadItem,
-  UploadState,
-  UploadStatus,
-} from "@/lib/upload-queue";
+import type { UploadItem, UploadState, UploadStatus } from "@/lib/upload-queue";
 
 function UploadStatusBadge({
   status,
@@ -61,7 +57,9 @@ function UploadProgressDetails({ item }: { item: UploadItem }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-muted-foreground text-xs tabular-nums">
-        <span>{finalizing ? "Finalizing on server…" : `${item.progress}%`}</span>
+        <span>
+          {finalizing ? "Finalizing on server…" : `${item.progress}%`}
+        </span>
         <span className="font-mono">
           {formatBytes(sent)} / {formatBytes(item.file.size)}
         </span>

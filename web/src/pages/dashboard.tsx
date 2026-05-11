@@ -1,10 +1,4 @@
-import {
-  Activity,
-  Database,
-  HardDrive,
-  Package,
-  Plus,
-} from "lucide-react";
+import { Activity, Database, HardDrive, Package, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
