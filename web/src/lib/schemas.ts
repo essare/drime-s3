@@ -50,6 +50,12 @@ export const BucketsResponseSchema = z.object({
 
 export const BucketCreatedSchema = z.object({ name: z.string() });
 
+export const CreateFolderResponseSchema = z.object({
+  name: z.string(),
+  prefix: z.string(),
+});
+export type CreateFolderResponse = z.infer<typeof CreateFolderResponseSchema>;
+
 export const StatsResponseSchema = z.object({
   buckets: z.number(),
   totalBytes: z.number(),
