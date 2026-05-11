@@ -6,6 +6,7 @@ import {
   handleDeleteBucketAdmin,
   handleListBucketsAdmin,
 } from "./handlers/buckets";
+import { handleCreateFolderAdmin } from "./handlers/folders";
 import { handleHealth } from "./handlers/health";
 import { handleInit } from "./handlers/init";
 import {
@@ -68,6 +69,16 @@ export async function dispatchAdmin(
     return handleDeleteBucketAdmin(
       ctx,
       decodeURIComponent(bucketOnly[1] ?? ""),
+    );
+  }
+
+  const folderCreate = /^\/_admin\/buckets\/([^/]+)\/folders$/.exec(path);
+  if (folderCreate && method === "POST") {
+    return handleCreateFolderAdmin(
+      ctx,
+      decodeURIComponent(folderCreate[1] ?? ""),
+      url,
+      req,
     );
   }
 

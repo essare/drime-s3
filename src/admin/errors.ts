@@ -1,6 +1,13 @@
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
-export function jsonOk(body: unknown, status = 200): Response {
+export function jsonOk(
+  body: unknown,
+  statusOrOptions: number | { status?: number } = 200,
+): Response {
+  const status =
+    typeof statusOrOptions === "number"
+      ? statusOrOptions
+      : (statusOrOptions.status ?? 200);
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...NO_STORE },
