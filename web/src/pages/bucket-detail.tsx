@@ -1,9 +1,11 @@
+import { FolderPlus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ObjectsBreadcrumbs } from "@/components/objects/breadcrumbs";
 import { BulkDeleteToolbar } from "@/components/objects/bulk-delete-toolbar";
+import { CreateFolderDialog } from "@/components/objects/create-folder-dialog";
 import { DropOverlay } from "@/components/objects/drop-overlay";
 import { ObjectTable } from "@/components/objects/object-table";
 import { UploadQueueSheet } from "@/components/objects/upload-queue";
@@ -77,6 +79,7 @@ export default function BucketDetailPage() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const {
     state: uploadState,
     enqueue,
@@ -194,6 +197,14 @@ export default function BucketDetailPage() {
         onClearCompleted={clearCompleted}
       />
 
+      <CreateFolderDialog
+        open={createFolderOpen}
+        onOpenChange={setCreateFolderOpen}
+        bucket={bucket}
+        prefix={prefix}
+        onSuccess={(data) => setSearchParams({ prefix: data.prefix })}
+      />
+
       <ObjectsBreadcrumbs
         bucket={bucket}
         prefix={prefix}
@@ -235,9 +246,19 @@ export default function BucketDetailPage() {
         onDownload={handleDownload}
         onRequestDelete={handleRequestDelete}
         toolbarRight={
-          <Button type="button" onClick={() => fileInputRef.current?.click()}>
-            Upload
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreateFolderOpen(true)}
+            >
+              <FolderPlus className="size-4" aria-hidden />
+              New folder
+            </Button>
+            <Button type="button" onClick={() => fileInputRef.current?.click()}>
+              Upload
+            </Button>
+          </div>
         }
         onLoadMore={() => void objects.fetchNextPage()}
         hasMore={Boolean(objects.hasNextPage)}

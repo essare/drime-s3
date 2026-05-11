@@ -6,7 +6,9 @@ import { useCreateFolder } from "./use-create-folder";
 
 function wrapper(client: QueryClient) {
   return function Wrap({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
   };
 }
 
@@ -45,7 +47,9 @@ describe("useCreateFolder", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const first = fetchMock.mock.calls[0];
+    expect(first).toBeDefined();
+    const [url, init] = first as [Parameters<typeof fetch>[0], RequestInit];
     expect(String(url)).toBe("/_admin/buckets/docs/folders");
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ path: "reports" }));
@@ -76,7 +80,9 @@ describe("useCreateFolder", () => {
         name: "q1",
       });
     });
-    const [url] = fetchMock.mock.calls[0]!;
+    const second = fetchMock.mock.calls[0];
+    expect(second).toBeDefined();
+    const [url] = second as [Parameters<typeof fetch>[0], RequestInit];
     expect(String(url)).toBe("/_admin/buckets/docs/folders?prefix=reports");
   });
 });
