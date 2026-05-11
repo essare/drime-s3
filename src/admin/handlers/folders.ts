@@ -25,7 +25,7 @@ export async function handleCreateFolderAdmin(
     return jsonError("BadRequest", "Body must be JSON.", 400);
   }
   const path = typeof body.path === "string" ? body.path : "";
-  if (!path) {
+  if (!path.trim()) {
     return jsonError("BadRequest", "Field `path` is required.", 400);
   }
 

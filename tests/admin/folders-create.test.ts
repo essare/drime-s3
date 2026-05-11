@@ -170,7 +170,15 @@ describe("POST /_admin/buckets/:b/folders", () => {
     });
     try {
       const cookie = await loginCookie(setup, "hunter2-hunter2");
-      const bad = ["a/b", "a\\b", ".", "..", "x\x00y", "x".repeat(256)];
+      const bad = [
+        "a/b",
+        "a\\b",
+        ".",
+        "..",
+        "x\x00y",
+        "x\x7fy",
+        "x".repeat(256),
+      ];
       for (const path of bad) {
         const r = await setup.call(
           new Request(`${ORIG}/_admin/buckets/docs/folders`, {
@@ -273,6 +281,50 @@ describe("POST /_admin/buckets/:b/folders", () => {
         }),
       );
       expect(r.status).toBe(403);
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("returns 503 WorkspaceUnavailable when workspace not initialized", async () => {
+    const setup = await startAdmin({
+      password: "hunter2-hunter2",
+      gatewayWorkspaceName: "does-not-exist",
+    });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request(`${ORIG}/_admin/buckets/docs/folders`, {
+          method: "POST",
+          headers: H(cookie),
+          body: JSON.stringify({ path: "x" }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const j = (await res.json()) as { error: { code: string } };
+      expect(j.error.code).toBe("WorkspaceUnavailable");
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("400 BadRequest on malformed JSON body", async () => {
+    const setup = await startAdmin({
+      password: "hunter2-hunter2",
+      seedRootFolders: ["docs"],
+    });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      const res = await setup.call(
+        new Request(`${ORIG}/_admin/buckets/docs/folders`, {
+          method: "POST",
+          headers: H(cookie),
+          body: "not json",
+        }),
+      );
+      expect(res.status).toBe(400);
+      const j = (await res.json()) as { error: { code: string } };
+      expect(j.error.code).toBe("BadRequest");
     } finally {
       setup.cleanup();
     }

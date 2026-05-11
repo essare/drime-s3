@@ -126,7 +126,6 @@ export async function adminGetStats(
   };
 }
 
-
 export type CreateBucketResult =
   | { kind: "ok" }
   | { kind: "invalid-name" }
@@ -516,4 +515,3 @@ export async function adminCreateFolder(
     id,
   };
 }
-
