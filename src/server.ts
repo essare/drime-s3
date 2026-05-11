@@ -7,6 +7,63 @@ function httpTraceEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
+function httpTraceVerbose(): boolean {
+  const v = process.env.DRIME_S3_HTTP_TRACE_VERBOSE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function isDuplicatiPrivilegesProbe(pathname: string): boolean {
+  return pathname.includes("duplicati-access-privileges-test");
+}
+
+/** Strip weak ETag prefix and quotes; return whether inner value is 32-char hex. */
+function etagMd5ShapeOk(etagHeader: string): boolean {
+  const inner = etagHeader
+    .replace(/^W\//i, "")
+    .replace(/^"+|"+$/g, "")
+    .trim();
+  return /^[a-f0-9]{32}$/i.test(inner);
+}
+
+/** Safe Sig V4 hints + optional full response header map for debugging third-party clients. */
+function s3TraceExtras(req: Request, res: Response, pathname: string): Record<string, unknown> {
+  const etagHdr = res.headers.get("etag") ?? "";
+  const out: Record<string, unknown> = {
+    host: req.headers.get("host") ?? "",
+    reqContentType: req.headers.get("content-type") ?? "",
+    resContentType: res.headers.get("content-type") ?? "",
+    lastModified: res.headers.get("last-modified") ?? "",
+    etagMd5ShapeOk: etagHdr.length > 0 ? etagMd5ShapeOk(etagHdr) : null,
+  };
+
+  if (isDuplicatiPrivilegesProbe(pathname)) {
+    out.duplicatiPrivilegesProbe = true;
+  }
+
+  const auth = req.headers.get("authorization");
+  if (auth?.startsWith("AWS4-HMAC-SHA256")) {
+    const m = auth.match(/Credential=([^/\s,]+)/);
+    const fullKey = m?.[1];
+    out.sigv4AccessKeyId =
+      fullKey !== undefined && fullKey.length > 0 ? fullKey : "(parse failed)";
+    const scope = auth.match(/Credential=[^/]+\/([^/]+\/[^/]+\/[^/]+)\//);
+    out.sigv4CredentialScope = scope?.[1] ?? "";
+  }
+
+  out.amzDate = req.headers.get("x-amz-date") ?? "";
+  out.amzContentSha256 = req.headers.get("x-amz-content-sha256") ?? "";
+
+  if (httpTraceVerbose()) {
+    const responseHeaders: Record<string, string> = {};
+    res.headers.forEach((value, key) => {
+      responseHeaders[key.toLowerCase()] = value;
+    });
+    out.responseHeaders = responseHeaders;
+  }
+
+  return out;
+}
+
 function shouldTracePath(pathname: string): boolean {
   if (pathname === "/_health") return false;
   if (pathname.startsWith("/_admin")) return false;
@@ -46,6 +103,7 @@ export function startGateway(
           if (shouldTracePath(u.pathname)) {
             logger.info(
               {
+                ...s3TraceExtras(req, res, u.pathname),
                 method: req.method,
                 path: u.pathname + u.search,
                 status: res.status,

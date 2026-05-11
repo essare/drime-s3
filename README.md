@@ -168,7 +168,8 @@ bun install --frozen-lockfile --cwd web
 - `DRIME_API_BASE_URL` — optional; default `https://app.drime.cloud/api/v1`.
 - `DRIME_GATEWAY_WORKSPACE_NAME` — optional; default `drime-s3`.
 - `DRIME_S3_INSECURE=1` or `--insecure` — skips Sig V4 verification (**development only**).
-- `DRIME_S3_HTTP_TRACE=1` — log each S3 response (`method`, `path`, `status`, `etag`, `contentLength`, `requestId`) for correlating third-party clients (e.g. Duplicati) with gateway behavior.
+- `DRIME_S3_HTTP_TRACE=1` — log each S3 response (method, path, status, **etag**, content-length, request id, **host**, Sig V4 access key id + credential scope from `Authorization`, **`etagMd5ShapeOk`** when Duplicati-compatible hex matters). Requests whose path contains **`duplicati-access-privileges-test`** set **`duplicatiPrivilegesProbe`: true**.
+- `DRIME_S3_HTTP_TRACE_VERBOSE=1` — with **`DRIME_S3_HTTP_TRACE=1`**, also log the **full response header map** (useful when a proxy strips or rewrites **ETag**).
 - `LOG_LEVEL` or `PINO_LOG_LEVEL` — Pino log level (`trace`, `debug`, `info`, …); default `info`.
 
 With Sig V4 enabled, set **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** to strings **you choose** (they are only for this gateway, not from Drime or AWS), or define `[s3]` in the config file below. For the admin UI, set **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** (hex, at least 32 characters); the Docker Compose example in this README uses **`changeme`** and a fixed dev hex string as defaults.
