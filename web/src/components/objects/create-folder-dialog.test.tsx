@@ -77,7 +77,9 @@ describe("CreateFolderDialog", () => {
     );
     await userEvent.type(screen.getByLabelText(/folder name/i), "a/b");
     await userEvent.click(screen.getByRole("button", { name: /create/i }));
-    expect(await screen.findByText(/slashes are not allowed/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/slashes are not allowed/i),
+    ).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -87,7 +89,8 @@ describe("CreateFolderDialog", () => {
         JSON.stringify({
           error: {
             code: "FolderAlreadyExists",
-            message: 'A folder named "reports" already exists at this location.',
+            message:
+              'A folder named "reports" already exists at this location.',
             details: { existingKind: "folder" },
           },
         }),
