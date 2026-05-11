@@ -65,12 +65,13 @@ jobs:
           username: ${{ steps.ghcr_owner.outputs.owner_lc }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Docker Hub namespace (essayoub) differs from GitHub owner (essare).
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            docker.io/essare/drime-s3
+            docker.io/essayoub/drime-s3
             ghcr.io/${{ steps.ghcr_owner.outputs.owner_lc }}/drime-s3
           tags: |
             type=ref,event=branch

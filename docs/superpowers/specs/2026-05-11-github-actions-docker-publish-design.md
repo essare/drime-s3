@@ -39,9 +39,9 @@ Operators and contributors get **reproducible images** tied to `main` and to **t
 
 | # | Topic | Decision |
 |---|--------|----------|
-| 1 | **Docker Hub image** | `docker.io/essare/drime-s3` |
-| 2 | **GHCR image** | `ghcr.io/essare/drime-s3` (lowercase owner per GHCR rules) |
-| 3 | **Docker Hub auth** | Repository secrets `DOCKERHUB_USERNAME` (value `essare`) and `DOCKERHUB_TOKEN` (Docker Hub access token with push; not account password) |
+| 1 | **Docker Hub image** | `docker.io/essayoub/drime-s3` (Docker Hub username; GitHub owner remains `essare`) |
+| 2 | **GHCR image** | `ghcr.io/essare/drime-s3` (lowercase GitHub owner per GHCR rules) |
+| 3 | **Docker Hub auth** | Repository secrets `DOCKERHUB_USERNAME` (value `essayoub`) and `DOCKERHUB_TOKEN` (Docker Hub access token with push; not account password) |
 | 4 | **GHCR auth** | `GITHUB_TOKEN` with job permissions `packages: write` |
 | 5 | **Triggers** | `push` to branch `main`; `push` tags matching pattern `v*` |
 | 6 | **Semver / tags model** | **Hybrid C:** `main` pushes publish rolling tags only; humans push `vX.Y.Z` (and optional prereleases like `v2.0.0-rc.1`) to publish release tags |
@@ -85,7 +85,7 @@ Implementation note: `docker/metadata-action` supports semver type with flavor r
 - **Runner:** `ubuntu-latest`.
 - **Needs:** `quality`.
 - **Permissions:** `contents: read`, `packages: write`.
-- **Steps (conceptual):** checkout; Set up QEMU only if multi-arch is added later (omit in v1); Set up Docker Buildx; Log in to Docker Hub (`docker/login-action` with secrets); Log in to GHCR (`docker/login-action` with `registry: ghcr.io`, username = `github.actor` or `${{ github.repository_owner }}`, password = `GITHUB_TOKEN`); `docker/metadata-action` with `images: docker.io/essare/drime-s3` and `ghcr.io/essare/drime-s3` and tag rules per §5; `docker/build-push-action` with `push: true`, platforms `linux/amd64`, cache from/to GHA.
+- **Steps (conceptual):** checkout; Set up QEMU only if multi-arch is added later (omit in v1); Set up Docker Buildx; Log in to Docker Hub (`docker/login-action` with secrets); Log in to GHCR (`docker/login-action` with `registry: ghcr.io`, username = `github.actor` or `${{ github.repository_owner }}`, password = `GITHUB_TOKEN`); `docker/metadata-action` with `images: docker.io/essayoub/drime-s3` and `ghcr.io/essare/drime-s3` and tag rules per §5; `docker/build-push-action` with `push: true`, platforms `linux/amd64`, cache from/to GHA.
 
 ---
 
