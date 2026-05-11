@@ -154,10 +154,3 @@ describe("uploadReducer", () => {
     expect(uploading.active).toBeLessThanOrEqual(MAX_CONCURRENT);
   });
 });
-
-describe("crypto.randomUUID", () => {
-  it("is available in the Vitest jsdom environment", () => {
-    expect(typeof crypto.randomUUID).toBe("function");
-    expect(crypto.randomUUID()).toMatch(/^[0-9a-f-]{36}$/i);
-  });
-});

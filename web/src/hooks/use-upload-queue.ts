@@ -13,6 +13,7 @@ import {
   uploadReducer,
 } from "@/lib/upload-queue";
 import { putObjectXHR, UploadError } from "@/lib/upload-xhr";
+import { randomUuid } from "@/lib/utils";
 
 export type EnqueueArg = {
   file: File;
@@ -83,7 +84,7 @@ export function useUploadQueue({
         continue;
       }
       items.push({
-        id: crypto.randomUUID(),
+        id: randomUuid(),
         file: a.file,
         relativePath: rel,
         status: "queued",
