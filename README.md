@@ -6,65 +6,120 @@ The server is written in **TypeScript** and runs on **[Bun](https://bun.sh)**. R
 
 ---
 
-## Deploy with Docker
+## Deploy with Docker Compose
 
 Prebuilt images are published on **Docker Hub** (`docker.io/essayoub/drime-s3`) and **GitHub Container Registry** (`ghcr.io/essare/drime-s3`). Rolling builds use tags such as `main` and `sha-<short>`; stable releases use semver tags (for example `v1.2.3` and `1.2.3`).
 
-### 1. Pull an image
+The repository includes a **`docker-compose.yml`** that runs a single **`drime-s3`** service. Configuration is loaded from a **`.env`** file next to the compose file (see **`.env.example`**).
+
+### 1. Configure environment
 
 ```bash
-docker pull docker.io/essayoub/drime-s3:main
-# or
-docker pull ghcr.io/essare/drime-s3:main
+cp .env.example .env
+# Edit .env: set DRIME_API_KEY, S3_ACCESS_KEY, S3_SECRET_KEY,
+# WEB_UI_PASSWORD, and WEB_UI_SESSION_SECRET (hex, at least 32 characters).
 ```
-
-Use a **semver tag** instead of `main` when you want a pinned release.
-
-### 2. Configure secrets (production)
-
-Run with **Sig V4 enabled** (default): set **Drime** and **S3 signing** credentials, and **web UI** secrets. Do **not** set `DRIME_S3_INSECURE` in production.
 
 | Variable | Purpose |
 |----------|---------|
-| `DRIME_API_KEY` or `API_KEY` | Drime API bearer token |
+| `DRIME_API_KEY` | Drime API bearer token |
 | `DRIME_API_BASE_URL` | Optional; default `https://app.drime.cloud/api/v1` |
 | `DRIME_GATEWAY_WORKSPACE_NAME` | Workspace whose root folders map to buckets (default `drime-s3`) |
 | `DRIME_GATEWAY_WORKSPACE_ID` | Optional; pin workspace id and skip discovery |
-| `S3_ACCESS_KEY` | Access key id presented to S3 clients |
+| `S3_ACCESS_KEY` | Access key id for Sig V4 (use with AWS CLI / SDKs) |
 | `S3_SECRET_KEY` | Secret key for Sig V4 |
 | `WEB_UI_PASSWORD` | Password for the browser admin UI |
 | `WEB_UI_SESSION_SECRET` | Hex string, **at least 32 characters** (16 bytes), for signed cookies |
+| `DRIME_S3_IMAGE` | Optional; override image (default `docker.io/essayoub/drime-s3:main`) |
+| `DRIME_S3_PORT` | Optional; host port published to the container’s `8081` (default `8081`) |
 
-Optional listening overrides: `DRIME_S3_HOST`, `DRIME_S3_PORT` (the image defaults to listening on `8081` inside the container).
+Run with **Sig V4 enabled** (default): do **not** set `DRIME_S3_INSECURE` in production. For **local or lab use only**, you may set `DRIME_S3_INSECURE=1` in `.env` so missing S3 keys are auto-generated; **never** expose that on the public internet.
 
-### 3. Initialize the workspace (once per Drime account / name)
-
-```bash
-docker run --rm \
-  -e DRIME_API_KEY="your_drime_api_token" \
-  -e S3_ACCESS_KEY="your_access_key" \
-  -e S3_SECRET_KEY="your_secret_key" \
-  -e WEB_UI_PASSWORD="choose_a_strong_password" \
-  -e WEB_UI_SESSION_SECRET="00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" \
-  docker.io/essayoub/drime-s3:main \
-  init
-```
-
-### 4. Run the gateway
+### 2. Initialize the workspace (once per Drime account / workspace name)
 
 ```bash
-docker run -d --name drime-s3 -p 8081:8081 \
-  -e DRIME_API_KEY="your_drime_api_token" \
-  -e S3_ACCESS_KEY="your_access_key" \
-  -e S3_SECRET_KEY="your_secret_key" \
-  -e WEB_UI_PASSWORD="choose_a_strong_password" \
-  -e WEB_UI_SESSION_SECRET="00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" \
-  docker.io/essayoub/drime-s3:main
+docker compose run --rm drime-s3 init
 ```
 
-The process listens on **port 8081** (`/_health` is used for the container health check). Point your S3 client’s `endpoint_url` at `http://<host>:8081` (or HTTPS if you terminate TLS in front of the container). Open **`http://<host>:8081/_ui/`** for the admin UI.
+### 3. Start the gateway
 
-For **local or lab use only**, you may set `DRIME_S3_INSECURE=1` so missing S3 keys are auto-generated; **never** expose that mode on the public internet.
+```bash
+docker compose up -d
+```
+
+The gateway listens on **`http://127.0.0.1:${DRIME_S3_PORT:-8081}`** on the host. Health: `GET /_health`. Admin UI: **`http://127.0.0.1:${DRIME_S3_PORT:-8081}/_ui/`** (use your host and published port if they differ).
+
+Logs:
+
+```bash
+docker compose logs -f drime-s3
+```
+
+Stop:
+
+```bash
+docker compose down
+```
+
+---
+
+## AWS CLI examples
+
+Point the AWS CLI at drime-s3 with **`--endpoint-url`** and use the same **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** as in your `.env`. The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
+
+For **localhost** and custom endpoints, path-style addressing is reliable:
+
+```bash
+export AWS_ACCESS_KEY_ID="your_S3_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="your_S3_SECRET_KEY"
+export AWS_DEFAULT_REGION="drime"
+export AWS_EC2_METADATA_DISABLED="true"
+export AWS_USE_PATH_STYLE_ENDPOINT="true"
+
+ENDPOINT="http://127.0.0.1:8081"
+```
+
+### List buckets
+
+```bash
+aws s3 ls --endpoint-url "$ENDPOINT"
+```
+
+### Create a bucket (S3 “bucket” = root-level folder in Drime)
+
+```bash
+aws s3 mb "s3://my-demo-bucket" --endpoint-url "$ENDPOINT"
+```
+
+### Upload and download objects
+
+```bash
+echo "hello" > /tmp/hello.txt
+aws s3 cp /tmp/hello.txt "s3://my-demo-bucket/hello.txt" --endpoint-url "$ENDPOINT"
+aws s3 cp "s3://my-demo-bucket/hello.txt" - --endpoint-url "$ENDPOINT"
+```
+
+### List objects in a bucket
+
+```bash
+aws s3 ls "s3://my-demo-bucket/" --endpoint-url "$ENDPOINT"
+```
+
+### Delete an object and the bucket
+
+```bash
+aws s3 rm "s3://my-demo-bucket/hello.txt" --endpoint-url "$ENDPOINT"
+aws s3 rb "s3://my-demo-bucket" --endpoint-url "$ENDPOINT"
+```
+
+If `rb` fails because the bucket is not empty, use `aws s3 rb "s3://my-demo-bucket" --force --endpoint-url "$ENDPOINT"` (this deletes all objects under the prefix first).
+
+### Low-level API (optional)
+
+```bash
+aws s3api list-buckets --endpoint-url "$ENDPOINT"
+aws s3api head-bucket --bucket my-demo-bucket --endpoint-url "$ENDPOINT"
+```
 
 ---
 
