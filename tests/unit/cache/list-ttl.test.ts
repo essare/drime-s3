@@ -124,9 +124,7 @@ describe("ListTtlCache addEntry / removeEntryById", () => {
 
   test("addEntry replaces an entry with the same id (idempotent)", async () => {
     const cache = new ListTtlCache();
-    const fetcher = async (): Promise<FileEntry[]> => [
-      folderEntry(1, "alpha"),
-    ];
+    const fetcher = async (): Promise<FileEntry[]> => [folderEntry(1, "alpha")];
     await cache.getOrFetch(null, fetcher);
     cache.addEntry(null, { ...folderEntry(1, "alpha"), name: "renamed" });
 
