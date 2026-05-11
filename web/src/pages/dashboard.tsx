@@ -10,6 +10,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -202,12 +203,12 @@ export default function DashboardPage() {
             )}
           </CardContent>
           {!isLoading && topBuckets.length > 0 ? (
-            <CardHeader className="border-t">
-              <CardDescription>
+            <CardFooter className="justify-center border-t">
+              <CardDescription className="text-center">
                 Showing the {topBuckets.length} largest bucket
                 {topBuckets.length === 1 ? "" : "s"} by size.
               </CardDescription>
-            </CardHeader>
+            </CardFooter>
           ) : null}
         </Card>
       </section>

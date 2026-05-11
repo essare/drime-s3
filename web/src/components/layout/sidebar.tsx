@@ -1,7 +1,8 @@
-import { Database, LayoutDashboard, Package } from "lucide-react";
+import { LayoutDashboard, Package } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import { NavLink } from "react-router-dom";
 
+import { Logo } from "@/components/branding/logo";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -19,7 +20,7 @@ export function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r bg-card md:flex">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <Database aria-hidden className="size-5 text-muted-foreground" />
+        <Logo className="size-7 rounded-md" alt="" />
         <span className="text-sm font-semibold tracking-tight">drime-s3</span>
       </div>
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-1 p-3">

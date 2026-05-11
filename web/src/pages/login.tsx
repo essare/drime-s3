@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { Logo } from "@/components/branding/logo";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -101,7 +102,8 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-svh items-center justify-center bg-background p-8 text-foreground">
       <Card className="w-full max-w-md">
-        <CardHeader>
+        <CardHeader className="flex flex-col items-center gap-3 text-center">
+          <Logo className="size-16 rounded-2xl shadow-sm" alt="" />
           <CardTitle>drime-s3 admin</CardTitle>
           <CardDescription>
             {health.data?.version ? (

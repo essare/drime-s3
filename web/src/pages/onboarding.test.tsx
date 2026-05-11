@@ -72,7 +72,7 @@ function installAdminFetch(handlers: {
 }
 
 describe("OnboardingPage", () => {
-  it("renders the three step titles", async () => {
+  it("focuses on Step 3 (workspace) when env + drime are complete", async () => {
     globalThis.fetch = installAdminFetch({
       status: () =>
         Promise.resolve(
@@ -98,11 +98,89 @@ describe("OnboardingPage", () => {
       client,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText("Environment")).toBeInTheDocument();
+    expect(await screen.findByText("Step 3 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Initialize workspace")).toBeInTheDocument();
+    expect(screen.getByText("Workspace not found")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /initialize workspace/i }),
+    ).toBeInTheDocument();
+
+    expect(screen.queryByText("Environment")).not.toBeInTheDocument();
+    expect(screen.queryByText("Drime API")).not.toBeInTheDocument();
+  });
+
+  it("focuses on Step 1 (env) when DRIME_API_KEY is missing", async () => {
+    globalThis.fetch = installAdminFetch({
+      status: () =>
+        Promise.resolve(
+          jsonResponse({
+            env: {
+              drimeApiKeySet: false,
+              drimeApiBaseUrl: "https://drime.example",
+              s3KeysSet: true,
+              region: "drime",
+              webUiPasswordSet: true,
+            },
+            drime: { reachable: false, latencyMs: 0 },
+            workspace: { name: "gw", id: null, exists: false },
+          }),
+        ),
     });
+
+    const client = createTestQueryClient();
+    renderWithProviders(
+      <MemoryRouter>
+        <OnboardingPage />
+      </MemoryRouter>,
+      client,
+    );
+
+    expect(await screen.findByText("Step 1 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Environment")).toBeInTheDocument();
+    expect(screen.getByText("DRIME_API_KEY is missing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /initialize workspace/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("focuses on Step 2 (drime) when env is set but Drime is unreachable", async () => {
+    globalThis.fetch = installAdminFetch({
+      status: () =>
+        Promise.resolve(
+          jsonResponse({
+            env: {
+              drimeApiKeySet: true,
+              drimeApiBaseUrl: "https://drime.example",
+              s3KeysSet: true,
+              region: "drime",
+              webUiPasswordSet: true,
+            },
+            drime: {
+              reachable: false,
+              latencyMs: 4,
+              error: "connection refused",
+            },
+            workspace: { name: "gw", id: null, exists: false },
+          }),
+        ),
+    });
+
+    const client = createTestQueryClient();
+    renderWithProviders(
+      <MemoryRouter>
+        <OnboardingPage />
+      </MemoryRouter>,
+      client,
+    );
+
+    expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
     expect(screen.getByText("Drime API")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Cannot reach Drime API")).toBeInTheDocument();
+    expect(screen.getByText(/connection refused/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /initialize workspace/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("calls POST /_admin/init and shows success toast when Initialize is clicked", async () => {
@@ -135,7 +213,7 @@ describe("OnboardingPage", () => {
     );
 
     const btn = await screen.findByRole("button", {
-      name: "Initialize Workspace",
+      name: /initialize workspace/i,
     });
     await user.click(btn);
 
@@ -161,7 +239,7 @@ describe("OnboardingPage", () => {
     expect(initCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("does not offer Initialize Workspace while Drime is unreachable", async () => {
+  it("Back button navigates to the previous step", async () => {
     globalThis.fetch = installAdminFetch({
       status: () =>
         Promise.resolve(
@@ -173,16 +251,13 @@ describe("OnboardingPage", () => {
               region: "drime",
               webUiPasswordSet: true,
             },
-            drime: {
-              reachable: false,
-              latencyMs: 4,
-              error: "connection refused",
-            },
+            drime: { reachable: true, latencyMs: 87 },
             workspace: { name: "gw", id: null, exists: false },
           }),
         ),
     });
 
+    const user = userEvent.setup();
     const client = createTestQueryClient();
     renderWithProviders(
       <MemoryRouter>
@@ -191,11 +266,9 @@ describe("OnboardingPage", () => {
       client,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText("Drime API")).toBeInTheDocument();
-    });
-    expect(
-      screen.queryByRole("button", { name: "Initialize Workspace" }),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText("Step 3 of 3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /back/i }));
+    expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Drime API")).toBeInTheDocument();
   });
 });
