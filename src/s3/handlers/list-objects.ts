@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
-import { etagFromEntryDescription } from "../tagging";
+import { etagFromFileEntry } from "../tagging";
 import { type ListBucketEntry, listBucketResultXml } from "../xml";
 
 export type AdminObject = {
@@ -71,20 +71,11 @@ function formatIso(updatedAt: string | null): string {
     : new Date(0).toISOString();
 }
 
-function entryEtag(entry: FileEntry): string {
-  const fromDesc = etagFromEntryDescription(entry.description);
-  if (fromDesc !== '"unknown"') return fromDesc;
-  if (entry.hash) {
-    return `"${entry.hash}"`;
-  }
-  return '"unknown"';
-}
-
 function toContent(entry: FileEntry, key: string): ListBucketEntry {
   return {
     Key: key,
     LastModified: formatIso(entry.updated_at),
-    ETag: entryEtag(entry),
+    ETag: etagFromFileEntry(entry),
     Size: entry.file_size,
     StorageClass: "STANDARD",
   };

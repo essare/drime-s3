@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { XMLBuilder } from "fast-xml-parser";
+import type { FileEntry } from "../drime/types";
 
 const S3_XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/";
 
@@ -26,12 +28,30 @@ export function buildObjectDescription(
   return `${md5Line}\n${TAG_LINE_PREFIX}${t}`;
 }
 
-export function etagFromEntryDescription(description: string | null): string {
-  const first = description?.split("\n")[0]?.trim() ?? "";
+/**
+ * S3 `ETag` for a `FileEntry` (GET/HEAD/list). Many clients expect a 32-char
+ * hex MD5 or a composite multipart form; never emit a non-hex placeholder like
+ * `"unknown"` which breaks strict parsers (e.g. Duplicati / .NET).
+ */
+export function etagFromFileEntry(entry: FileEntry): string {
+  const first = entry.description?.split("\n")[0]?.trim() ?? "";
   if (first.startsWith("md5:")) {
-    return `"${first.slice(4)}"`;
+    const hex = first.slice(4).replace(/\s+/g, "");
+    if (/^[a-f0-9]{32}$/i.test(hex)) return `"${hex.toLowerCase()}"`;
+    return `"${hex}"`;
   }
-  return '"unknown"';
+  const rawHash = entry.hash?.trim().replace(/^"+|"+$/g, "") ?? "";
+  if (rawHash.length > 0) {
+    if (/^[a-f0-9]{32}$/i.test(rawHash)) return `"${rawHash.toLowerCase()}"`;
+    return `"${rawHash}"`;
+  }
+  const fp = createHash("md5")
+    .update(
+      `${entry.id}\0${entry.file_size}\0${entry.updated_at ?? ""}\0${entry.name}`,
+      "utf8",
+    )
+    .digest("hex");
+  return `"${fp}"`;
 }
 
 export function parseTaggingLine(description: string | null): string | null {

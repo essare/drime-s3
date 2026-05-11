@@ -18,7 +18,7 @@ import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
 import {
   buildObjectDescription,
-  etagFromEntryDescription,
+  etagFromFileEntry,
   objectTaggingXml,
   parseTaggingLine,
 } from "../tagging";
@@ -37,15 +37,6 @@ function formatHttpDate(updatedAt: string | null): string {
   const t = updatedAt ? Date.parse(updatedAt) : NaN;
   const d = Number.isFinite(t) ? new Date(t) : new Date(0);
   return d.toUTCString();
-}
-
-function entryEtag(entry: FileEntry): string {
-  const fromDesc = etagFromEntryDescription(entry.description);
-  if (fromDesc !== '"unknown"') return fromDesc;
-  if (entry.hash) {
-    return `"${entry.hash}"`;
-  }
-  return '"unknown"';
 }
 
 function joinUrlWithApiBase(apiBaseUrl: string, relativeUrl: string): string {
@@ -399,7 +390,7 @@ export async function handleObjectRequest(
         "Content-Type": entry.mime ?? "application/octet-stream",
         "Content-Length": String(entry.file_size),
         "Last-Modified": formatHttpDate(entry.updated_at),
-        ETag: entryEtag(entry),
+        ETag: etagFromFileEntry(entry),
         "Accept-Ranges": "bytes",
       },
     });
@@ -436,7 +427,7 @@ export async function handleObjectRequest(
     }
     const headers = pickDownloadResponseHeaders(upstream);
     headers["Last-Modified"] = formatHttpDate(entry.updated_at);
-    headers.ETag = entryEtag(entry);
+    headers.ETag = etagFromFileEntry(entry);
     return new Response(upstream.body, {
       status: upstream.status,
       headers,
