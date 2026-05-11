@@ -140,6 +140,12 @@ aws s3api list-buckets
 aws s3api head-bucket --bucket my-demo-bucket
 ```
 
+### Third-party S3 clients (Duplicati, restic, etc.)
+
+- Set **region** (sometimes labeled *location* or *AWS region*) to **`drime`**. This gateway uses that name in the Sig V4 credential scope; clients that default to **`us-east-1`** will fail with **“The request signature we calculated does not match…”**.
+- Use your gateway URL as the **endpoint** (e.g. `http://192.168.2.33:38280`). Enable **path-style** addressing if the client offers it when using a raw IP or custom port.
+- **Duplicati** and similar tools often send **`x-amz-content-sha256: UNSIGNED-PAYLOAD`** on PUT; images **before v1.0.1** mishandled that header during verification. Use **`v1.0.1`** or newer (or a `main` image built from this fix).
+
 ---
 
 ## Run locally (from source)

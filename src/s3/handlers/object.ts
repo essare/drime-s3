@@ -141,9 +141,9 @@ async function writeRequestBodyToTemp(
     await fh.close();
     return { tmpDir, tmpPath, md5Hex: hash.digest("hex"), totalSize: 0 };
   }
+  const amzSha = req.headers.get("x-amz-content-sha256")?.trim() ?? "";
   const isAwsChunked =
-    req.headers.get("x-amz-content-sha256") ===
-    "STREAMING-AWS4-HMAC-SHA256-PAYLOAD";
+    amzSha.toUpperCase() === "STREAMING-AWS4-HMAC-SHA256-PAYLOAD";
   const stream = isAwsChunked
     ? rawBody.pipeThrough(
         createAwsChunkedPayloadTransform({ insecure: ctx.config.insecure }),

@@ -142,4 +142,51 @@ describe("verifySignatureV4", () => {
     );
     expect(ok).toBe(true);
   });
+
+  test("accepts UNSIGNED-PAYLOAD for PUT (S3 clients such as Duplicati)", async () => {
+    const url = new URL(
+      "http://192.168.2.33:38280/duplicati-backups/access-privileges-test.tmp",
+    );
+    const accessKey = "AKIATESTKEYEXAMPLE";
+    const secretKey = "testSecretAccessKey01234567890123456789012";
+    const dateStamp = "20260101";
+    const amzDate = "20260101T120000Z";
+    const region = "drime";
+    const svc = "s3";
+    const headers = new Headers();
+    headers.set("Host", "192.168.2.33:38280");
+    headers.set("x-amz-date", amzDate);
+    headers.set("x-amz-content-sha256", "UNSIGNED-PAYLOAD");
+    headers.set(
+      "Authorization",
+      [
+        `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${svc}/aws4_request`,
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date",
+        "Signature=0000000000000000000000000000000000000000000000000000000000000000",
+      ].join(", "),
+    );
+    const parsed = parseAuthorizationHeaderForTests(
+      headers.get("Authorization"),
+    );
+    const sig = await computeSignatureV4ForTests(
+      { method: "PUT", url, headers },
+      secretKey,
+      parsed,
+      "UNSIGNED-PAYLOAD",
+    );
+    headers.set(
+      "Authorization",
+      [
+        `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${svc}/aws4_request`,
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date",
+        `Signature=${sig}`,
+      ].join(", "),
+    );
+    const ok = await verifySignatureV4(
+      new Request(url, { method: "PUT", headers }),
+      { method: "PUT", url, headers },
+      { accessKey, secretKey },
+    );
+    expect(ok).toBe(true);
+  });
 });

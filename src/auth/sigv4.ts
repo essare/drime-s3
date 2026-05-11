@@ -104,6 +104,10 @@ function trimHeaderValue(v: string): string {
   return v.replace(/\s+/g, " ").trim();
 }
 
+export class SigV4Error extends Error {
+  readonly name = "SigV4Error";
+}
+
 function buildCanonicalHeaders(
   headers: Headers,
   signedHeaderNames: string[],
@@ -129,10 +133,6 @@ function buildCanonicalHeaders(
   }
   const signedLine = sorted.join(";");
   return { canonical, signedLine };
-}
-
-export class SigV4Error extends Error {
-  readonly name = "SigV4Error";
 }
 
 export type VerifySignatureV4Credentials = {
@@ -243,8 +243,8 @@ export async function verifySignatureV4(
   }
 
   const payloadHash =
-    opts.bodySha256 ??
-    headers.get("x-amz-content-sha256")?.trim().toLowerCase() ??
+    opts.bodySha256?.trim() ??
+    headers.get("x-amz-content-sha256")?.trim() ??
     (await sha256Hex(new Uint8Array(0)));
 
   const amzDate = headers.get("x-amz-date")?.trim();
