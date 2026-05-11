@@ -1,4 +1,4 @@
-# drime-s3 — single-service stack. Copy .env.example to .env, fill secrets, then:
+# drime-s3 — single-service stack. Create `.env` next to this file, then:
 #   docker compose run --rm drime-s3 init   # once per Drime workspace name
 #   docker compose up -d
 

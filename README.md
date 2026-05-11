@@ -10,15 +10,41 @@ The server is written in **TypeScript** and runs on **[Bun](https://bun.sh)**. R
 
 Prebuilt images are published on **Docker Hub** (`docker.io/essayoub/drime-s3`) and **GitHub Container Registry** (`ghcr.io/essare/drime-s3`). Rolling builds use tags such as `main` and `sha-<short>`; stable releases use semver tags (for example `v1.2.3` and `1.2.3`).
 
-The repository includes a **`docker-compose.yml`** that runs a single **`drime-s3`** service. Configuration is loaded from a **`.env`** file next to the compose file (see **`.env.example`**).
+Create **`docker-compose.yml`** in an empty directory (or use the same file from the repository root if you cloned the project) with the following contents. Put a **`.env`** file in that directory; variables are listed in step 1.
+
+```yaml
+# drime-s3 — single-service stack. Create `.env` next to this file, then:
+#   docker compose run --rm drime-s3 init   # once per Drime workspace name
+#   docker compose up -d
+
+services:
+  drime-s3:
+    image: ${DRIME_S3_IMAGE:-docker.io/essayoub/drime-s3:main}
+    container_name: drime-s3
+    restart: unless-stopped
+    ports:
+      - "${DRIME_S3_PORT:-8081}:8081"
+    environment:
+      DRIME_API_KEY: ${DRIME_API_KEY:?Set DRIME_API_KEY in .env (see .env.example)}
+      DRIME_API_BASE_URL: ${DRIME_API_BASE_URL:-https://app.drime.cloud/api/v1}
+      DRIME_GATEWAY_WORKSPACE_NAME: ${DRIME_GATEWAY_WORKSPACE_NAME:-drime-s3}
+      DRIME_GATEWAY_WORKSPACE_ID: ${DRIME_GATEWAY_WORKSPACE_ID:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
+      WEB_UI_PASSWORD: ${WEB_UI_PASSWORD:?Set WEB_UI_PASSWORD in .env}
+      WEB_UI_SESSION_SECRET: ${WEB_UI_SESSION_SECRET:?Set WEB_UI_SESSION_SECRET in .env (hex, 32+ chars)}
+      DRIME_S3_INSECURE: ${DRIME_S3_INSECURE:-}
+```
 
 ### 1. Configure environment
 
+If you cloned the repo, you can start from the tracked template:
+
 ```bash
 cp .env.example .env
-# Edit .env: set DRIME_API_KEY, S3_ACCESS_KEY, S3_SECRET_KEY,
-# WEB_UI_PASSWORD, and WEB_UI_SESSION_SECRET (hex, at least 32 characters).
 ```
+
+Otherwise create **`.env`** manually in the same directory as `docker-compose.yml`. Set at least **`DRIME_API_KEY`**, **`S3_ACCESS_KEY`**, **`S3_SECRET_KEY`**, **`WEB_UI_PASSWORD`**, and **`WEB_UI_SESSION_SECRET`** (hex string, at least 32 characters).
 
 | Variable | Purpose |
 |----------|---------|
