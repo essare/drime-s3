@@ -37,7 +37,7 @@ async function uploadObject(
         Cookie: cookie,
         Origin: ORIG,
       },
-      body,
+      body: body as BodyInit,
     }),
   );
   if (res.status !== 200) {
