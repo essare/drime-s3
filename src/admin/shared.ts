@@ -415,3 +415,105 @@ export async function adminDeleteObject(
     message: msgMatch?.[1] ?? "Delete failed.",
   };
 }
+
+const FOLDER_NAME_MAX = 255;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: validating folder names per admin contract
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
+
+function validateFolderName(
+  raw: string,
+): { ok: true; name: string } | { ok: false; message: string } {
+  const name = raw.trim();
+  if (name.length === 0)
+    return { ok: false, message: "Folder name is required." };
+  if (name.length > FOLDER_NAME_MAX) {
+    return {
+      ok: false,
+      message: `Folder name must be ${FOLDER_NAME_MAX} characters or fewer.`,
+    };
+  }
+  if (/[/\\]/.test(name))
+    return { ok: false, message: "Slashes are not allowed." };
+  if (CONTROL_CHAR_RE.test(name))
+    return { ok: false, message: "Control characters are not allowed." };
+  if (name === "." || name === "..")
+    return { ok: false, message: "Reserved name." };
+  return { ok: true, name };
+}
+
+async function resolvePrefixUnder(
+  ctx: AppContext,
+  W: number,
+  bucketRootId: number,
+  prefix: string,
+): Promise<number | "missing"> {
+  const trimmed = prefix.replace(/^\/+|\/+$/g, "");
+  if (trimmed.length === 0) return bucketRootId;
+  const parts = trimmed.split("/").filter(Boolean);
+  let currentId = bucketRootId;
+  for (const part of parts) {
+    const entries = await ctx.listCache.getOrFetch(currentId, () =>
+      ctx.drime.listFolder(currentId, W),
+    );
+    const found = entries.find(
+      (e) => e.is_folder && e.name.toLowerCase() === part.toLowerCase(),
+    );
+    if (!found) return "missing";
+    currentId = found.id;
+  }
+  return currentId;
+}
+
+export async function adminCreateFolder(
+  ctx: AppContext,
+  W: number,
+  bucket: string,
+  prefix: string,
+  rawName: string,
+): Promise<CreateFolderResult> {
+  const validation = validateFolderName(rawName);
+  if (!validation.ok) return { kind: "invalid", message: validation.message };
+  const { name } = validation;
+
+  const root = await findRootFolder(ctx, W, bucket);
+  if (root === undefined) return { kind: "no-such-bucket" };
+
+  const parentResolved = await resolvePrefixUnder(ctx, W, root.id, prefix);
+  if (parentResolved === "missing") return { kind: "no-such-prefix" };
+  const parentId = parentResolved;
+
+  const siblings = await ctx.listCache.getOrFetch(parentId, () =>
+    ctx.drime.listFolder(parentId, W),
+  );
+  const collision = siblings.find(
+    (e) => e.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (collision) {
+    return {
+      kind: "exists",
+      existingKind: collision.is_folder ? "folder" : "file",
+    };
+  }
+
+  const raw = await ctx.drime.createFolder(name, { parentId, workspaceId: W });
+  const id = parseCreateFolderResponse(raw);
+  if (id === undefined) {
+    ctx.listCache.invalidate(parentId);
+    const trimmedPrefix = prefix.replace(/^\/+|\/+$/g, "");
+    return {
+      kind: "ok",
+      name,
+      prefix: trimmedPrefix ? `${trimmedPrefix}/${name}/` : `${name}/`,
+      id: -1,
+    };
+  }
+  ctx.listCache.addEntry(parentId, buildSeedFolderEntry(raw, id, name));
+  const trimmedPrefix = prefix.replace(/^\/+|\/+$/g, "");
+  return {
+    kind: "ok",
+    name,
+    prefix: trimmedPrefix ? `${trimmedPrefix}/${name}/` : `${name}/`,
+    id,
+  };
+}
+
