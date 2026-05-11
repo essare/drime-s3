@@ -10,9 +10,9 @@ The server is written in **TypeScript** and runs on **[Bun](https://bun.sh)**. R
 
 Prebuilt images are published on **Docker Hub** (`docker.io/essayoub/drime-s3`) and **GitHub Container Registry** (`ghcr.io/essare/drime-s3`). Rolling builds use tags such as `main` and `sha-<short>`; stable releases use semver tags (for example `v1.2.3` and `1.2.3`).
 
-Create **`docker-compose.yml`** (or use the copy in the repository root) and replace the placeholder strings under **`environment`** with your real values. No separate **`.env`** file is required for this layout.
+Create **`docker-compose.yml`** (or use the copy in the repository root) and replace at least **`DRIME_API_KEY`** and your chosen **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`**. No separate **`.env`** file is required for this layout.
 
-**Where values come from:** **`DRIME_API_KEY`** is issued by **Drime** (your account). **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** are **not** from Drime or AWS—you **invent** them (any strong strings you keep secret). They are the username/password Sig V4 clients (AWS CLI, SDKs, other apps) use against *this* gateway only. **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** are also yours to define (session secret: long random hex).
+**Where values come from:** **`DRIME_API_KEY`** is issued by **Drime** (your account). **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** are **not** from Drime or AWS—you **invent** them (any strong strings you keep secret). They are the username/password Sig V4 clients (AWS CLI, SDKs, other apps) use against *this* gateway only. **`WEB_UI_PASSWORD`** defaults to **`changeme`** and **`WEB_UI_SESSION_SECRET`** to a fixed **64-character hex** string so the stack runs out of the box—**change both before any real deployment** (session secret must stay hex; use e.g. `openssl rand -hex 32`).
 
 ```yaml
 # drime-s3 — edit `environment` values below, then:
@@ -33,8 +33,10 @@ services:
       # Pick any secret strings; clients use them for Sig V4 here — not from Drime or AWS
       S3_ACCESS_KEY: "YOUR_S3_ACCESS_KEY"
       S3_SECRET_KEY: "YOUR_S3_SECRET_KEY"
-      WEB_UI_PASSWORD: "YOUR_WEB_UI_PASSWORD"
-      WEB_UI_SESSION_SECRET: "YOUR_HEX_SESSION_SECRET_AT_LEAST_32_CHARS"
+      # Dev defaults — change before production
+      WEB_UI_PASSWORD: "changeme"
+      # Dev default only — rotate in production (64 hex chars = 32 bytes)
+      WEB_UI_SESSION_SECRET: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 ```
 
 ### 1. Configure `environment`
@@ -46,8 +48,8 @@ services:
 | `DRIME_GATEWAY_WORKSPACE_NAME` | Workspace whose root folders map to buckets |
 | `S3_ACCESS_KEY` | **You choose** this string; S3 clients send it as the access key id for Sig V4 to this gateway (not from Drime or AWS) |
 | `S3_SECRET_KEY` | **You choose** this string; paired secret for Sig V4 (not from Drime or AWS) |
-| `WEB_UI_PASSWORD` | Password for the browser admin UI |
-| `WEB_UI_SESSION_SECRET` | Hex string, **at least 32 characters** (16 bytes); e.g. `openssl rand -hex 32` |
+| `WEB_UI_PASSWORD` | Browser admin UI password; defaults to **`changeme`** (change for production) |
+| `WEB_UI_SESSION_SECRET` | Hex session signing key, **at least 32 characters**; defaults to a **dev-only** 64-hex string in the snippet (rotate for production; e.g. `openssl rand -hex 32`) |
 
 Optional: add **`DRIME_GATEWAY_WORKSPACE_ID`** under `environment` with a numeric string to pin the workspace. Change **`image`** to another tag or registry (`ghcr.io/essare/drime-s3:main`, a semver tag, etc.). Change the host side of **`ports`** (e.g. `9000:8081`) if `8081` is already taken on the host.
 
@@ -163,7 +165,7 @@ bun install --frozen-lockfile --cwd web
 - `DRIME_GATEWAY_WORKSPACE_NAME` — optional; default `drime-s3`.
 - `DRIME_S3_INSECURE=1` or `--insecure` — skips Sig V4 verification (**development only**).
 
-With Sig V4 enabled, set **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** to strings **you choose** (they are only for this gateway, not from Drime or AWS), or define `[s3]` in the config file below. For the admin UI in production-like mode, set `WEB_UI_PASSWORD` and `WEB_UI_SESSION_SECRET` (hex, at least 32 characters).
+With Sig V4 enabled, set **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** to strings **you choose** (they are only for this gateway, not from Drime or AWS), or define `[s3]` in the config file below. For the admin UI, set **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** (hex, at least 32 characters); the Docker Compose example in this README uses **`changeme`** and a fixed dev hex string as defaults.
 
 ### Initialize and serve
 
