@@ -1,7 +1,19 @@
-import { Database } from "lucide-react";
+import { Database, LayoutDashboard, Package } from "lucide-react";
+import type { ComponentType, SVGProps } from "react";
 import { NavLink } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
+
+type NavItem = {
+  to: string;
+  label: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+};
+
+const NAV_ITEMS: readonly NavItem[] = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/buckets", label: "Buckets", icon: Package },
+];
 
 export function Sidebar() {
   return (
@@ -11,19 +23,23 @@ export function Sidebar() {
         <span className="text-sm font-semibold tracking-tight">drime-s3</span>
       </div>
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-1 p-3">
-        <NavLink
-          to="/dashboard"
-          className={({ isActive }) =>
-            cn(
-              "rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              isActive
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-            )
-          }
-        >
-          Dashboard
-        </NavLink>
+        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+              )
+            }
+          >
+            <Icon className="size-4" aria-hidden />
+            {label}
+          </NavLink>
+        ))}
       </nav>
     </aside>
   );

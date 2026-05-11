@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -41,21 +41,18 @@ function defaultStatus() {
 }
 
 describe("DashboardPage", () => {
-  it("renders count and bucket grid with links", async () => {
+  it("renders bucket count, size, object count, workspace status, and top buckets", async () => {
     mockFetchByUrl({
       "/_admin/status": () => defaultStatus(),
-      "/_admin/buckets": () =>
+      "/_admin/stats": () =>
         jsonResponse({
-          count: 2,
-          buckets: [
-            {
-              name: "alpha",
-              createdAt: "2026-05-09T10:00:00.000Z",
-            },
-            {
-              name: "beta",
-              createdAt: "2026-05-08T10:00:00.000Z",
-            },
+          buckets: 3,
+          totalBytes: 1024 * 1024 * 250 + 500,
+          totalObjects: 142,
+          perBucket: [
+            { name: "alpha", bytes: 1024 * 1024 * 200, objects: 100 },
+            { name: "beta", bytes: 1024 * 1024 * 50, objects: 40 },
+            { name: "gamma", bytes: 500, objects: 2 },
           ],
         }),
     });
@@ -69,26 +66,44 @@ describe("DashboardPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("2 buckets")).toBeInTheDocument();
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
     });
 
-    expect(
-      screen.getByText("Workspace: drime_admin · Drime reachable in 87 ms"),
-    ).toBeInTheDocument();
+    const buckets = await screen.findByRole("region", {
+      name: /workspace stats/i,
+    });
+    expect(buckets).toHaveTextContent("Total buckets");
+    expect(buckets).toHaveTextContent("3");
+    expect(buckets).toHaveTextContent("Workspace size");
+    expect(buckets).toHaveTextContent("250 MB");
+    expect(buckets).toHaveTextContent("Total objects");
+    expect(buckets).toHaveTextContent("142");
+    expect(buckets).toHaveTextContent("drime_admin");
+    expect(buckets).toHaveTextContent("Drime reachable in 87 ms");
 
-    const alpha = screen.getByRole("link", { name: /alpha/i });
-    const beta = screen.getByRole("link", { name: /beta/i });
-    expect(alpha).toHaveAttribute("href", "/buckets/alpha");
-    expect(beta).toHaveAttribute("href", "/buckets/beta");
+    const top = await screen.findByRole("region", {
+      name: /top buckets by size/i,
+    });
+    expect(top).toHaveTextContent("alpha");
+    expect(top).toHaveTextContent("200 MB");
+    expect(top).toHaveTextContent("beta");
+    expect(top).toHaveTextContent("50 MB");
+    expect(top).toHaveTextContent("gamma");
+    expect(within(top).getByRole("link", { name: /alpha/i })).toHaveAttribute(
+      "href",
+      "/buckets/alpha",
+    );
   });
 
-  it("shows empty state CTA when there are no buckets", async () => {
+  it("shows empty-state CTA when there are no buckets", async () => {
     mockFetchByUrl({
       "/_admin/status": () => defaultStatus(),
-      "/_admin/buckets": () =>
+      "/_admin/stats": () =>
         jsonResponse({
-          count: 0,
-          buckets: [],
+          buckets: 0,
+          totalBytes: 0,
+          totalObjects: 0,
+          perBucket: [],
         }),
     });
 
@@ -101,19 +116,17 @@ describe("DashboardPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("0 buckets")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /create your first bucket/i }),
+      ).toBeInTheDocument();
     });
-
-    expect(screen.getByText("No buckets yet")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Create your first bucket" }),
-    ).toBeInTheDocument();
   });
 
-  it("shows skeleton placeholders while buckets are loading", async () => {
+  it("renders error alert when stats endpoint fails", async () => {
     mockFetchByUrl({
       "/_admin/status": () => defaultStatus(),
-      "/_admin/buckets": () => new Promise<Response>(() => {}),
+      "/_admin/stats": () =>
+        jsonResponse({ error: { code: "Boom", message: "boom" } }, 500),
     });
 
     const client = createTestQueryClient();
@@ -125,9 +138,7 @@ describe("DashboardPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("bucket-skeleton").length).toBeGreaterThan(
-        0,
-      );
+      expect(screen.getByText("Could not load stats")).toBeInTheDocument();
     });
   });
 });

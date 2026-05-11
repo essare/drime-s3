@@ -13,6 +13,18 @@ export default defineConfig({
       "/_admin": {
         target: "http://127.0.0.1:8081",
         changeOrigin: true,
+        // Disable both proxy timeouts so large uploads (multi-GB) aren't
+        // killed mid-stream by node-http-proxy's default socket timeouts.
+        timeout: 0,
+        proxyTimeout: 0,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            // Rewrite Origin to satisfy the gateway's same-origin CSRF
+            // check (Origin must equal http(s)://Host). changeOrigin only
+            // rewrites Host; we also need to rewrite Origin for /_admin/*.
+            proxyReq.setHeader("origin", "http://127.0.0.1:8081");
+          });
+        },
       },
       // Optional (spec §8.1): also forward S3-style paths to the gateway during dev:
       //   "^/(?!_ui/|@vite|src/|node_modules/|@react-refresh|@id/).*": {

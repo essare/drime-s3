@@ -1,69 +1,96 @@
-import { MoreHorizontal, Package, Plus, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Database,
+  HardDrive,
+  Package,
+  Plus,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { CreateBucketDialog } from "@/components/buckets/create-bucket-dialog";
-import { DeleteBucketDialog } from "@/components/buckets/delete-bucket-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useBucketsQuery } from "@/hooks/use-buckets";
-import { useDeleteBucket } from "@/hooks/use-delete-bucket";
+import { useStatsQuery } from "@/hooks/use-stats";
 import { useStatusQuery } from "@/hooks/use-status";
-import { formatRelativeDate } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import type { StatusData } from "@/lib/schemas";
 
-function statusSubtitle(data: StatusData | undefined): string {
-  if (!data) return "Loading status…";
-  const ws = `Workspace: ${data.workspace.name}`;
-  const drime = data.drime.reachable
-    ? data.drime.latencyMs !== undefined
+function statusLine(data: StatusData | undefined): string {
+  if (!data) return "Loading…";
+  if (data.drime.reachable) {
+    return data.drime.latencyMs !== undefined
       ? `Drime reachable in ${data.drime.latencyMs} ms`
-      : "Drime reachable"
-    : (data.drime.error ?? "Drime unreachable");
-  return `${ws} · ${drime}`;
+      : "Drime reachable";
+  }
+  return data.drime.error ?? "Drime unreachable";
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  hint,
+  loading,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  loading?: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {label}
+        </CardTitle>
+        <div className="text-muted-foreground">{icon}</div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-8 w-24" />
+        ) : (
+          <p className="text-3xl font-semibold tracking-tight">{value}</p>
+        )}
+        {hint ? (
+          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function DashboardPage() {
   const [createOpen, setCreateOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<{ name: string } | null>(
-    null,
-  );
+  const statsQuery = useStatsQuery();
   const statusQuery = useStatusQuery();
-  const bucketsQuery = useBucketsQuery();
-  const deleteBucket = useDeleteBucket();
 
-  const onConfirmDelete = () => {
-    if (!pendingDelete) return;
-    deleteBucket.mutate(
-      { name: pendingDelete.name },
-      { onSettled: () => setPendingDelete(null) },
-    );
-  };
+  const stats = statsQuery.data;
+  const status = statusQuery.data;
+  const isLoading = statsQuery.isLoading;
 
-  const count = bucketsQuery.data?.count ?? 0;
-  const buckets = bucketsQuery.data?.buckets ?? [];
+  const topBuckets = (stats?.perBucket ?? [])
+    .slice()
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 5);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {bucketsQuery.isLoading ? (
-              <Skeleton className="h-9 w-44 max-w-full" aria-hidden />
-            ) : (
-              `${count} bucket${count === 1 ? "" : "s"}`
-            )}
-          </h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            {statusSubtitle(statusQuery.data)}
+            Workspace overview and storage usage.
           </p>
         </div>
         <Button
@@ -77,115 +104,119 @@ export default function DashboardPage() {
       </div>
 
       <CreateBucketDialog open={createOpen} onOpenChange={setCreateOpen} />
-      <DeleteBucketDialog
-        bucket={pendingDelete}
-        onClose={() => setPendingDelete(null)}
-        onConfirm={onConfirmDelete}
-        pending={deleteBucket.isPending}
-      />
 
-      {bucketsQuery.isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {(
-            [
-              "bucket-skeleton-a",
-              "bucket-skeleton-b",
-              "bucket-skeleton-c",
-              "bucket-skeleton-d",
-              "bucket-skeleton-e",
-              "bucket-skeleton-f",
-            ] as const
-          ).map((slotId) => (
-            <Card key={slotId} className="overflow-hidden">
-              <CardHeader className="space-y-2">
-                <Skeleton
-                  className="h-8 w-8 rounded-md"
-                  data-testid="bucket-skeleton"
-                />
-                <Skeleton className="h-5 w-32" data-testid="bucket-skeleton" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-3 w-24" data-testid="bucket-skeleton" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : bucketsQuery.isError ? (
+      {statsQuery.isError ? (
         <Alert variant="destructive">
-          <AlertTitle>Something went wrong</AlertTitle>
+          <AlertTitle>Could not load stats</AlertTitle>
           <AlertDescription>
-            {bucketsQuery.error instanceof Error
-              ? bucketsQuery.error.message
-              : "Failed to load buckets"}
+            {statsQuery.error instanceof Error
+              ? statsQuery.error.message
+              : "Failed to load workspace statistics"}
           </AlertDescription>
         </Alert>
-      ) : count === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border py-16 text-center">
-          <Package
-            className="size-12 text-muted-foreground"
-            aria-hidden
-            strokeWidth={1.25}
-          />
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">
-              No buckets yet
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Create a bucket to start storing objects.
-            </p>
-          </div>
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            Create your first bucket
+      ) : null}
+
+      <section
+        aria-label="Workspace stats"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      >
+        <StatCard
+          icon={<Package className="size-4" aria-hidden />}
+          label="Total buckets"
+          value={String(stats?.buckets ?? 0)}
+          loading={isLoading}
+        />
+        <StatCard
+          icon={<HardDrive className="size-4" aria-hidden />}
+          label="Workspace size"
+          value={formatBytes(stats?.totalBytes ?? 0)}
+          hint={
+            stats
+              ? `Across ${stats.buckets} bucket${stats.buckets === 1 ? "" : "s"}`
+              : undefined
+          }
+          loading={isLoading}
+        />
+        <StatCard
+          icon={<Database className="size-4" aria-hidden />}
+          label="Total objects"
+          value={(stats?.totalObjects ?? 0).toLocaleString()}
+          loading={isLoading}
+        />
+        <StatCard
+          icon={<Activity className="size-4" aria-hidden />}
+          label="Workspace"
+          value={status?.workspace.name ?? "—"}
+          hint={statusLine(status)}
+          loading={statusQuery.isLoading}
+        />
+      </section>
+
+      <section aria-label="Top buckets by size" className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Top buckets by size
+          </h2>
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/buckets">View all</Link>
           </Button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {buckets.map((b) => (
-            <div key={b.name} className="relative">
-              <Link to={`/buckets/${b.name}`} className="block h-full">
-                <Card className="h-full transition-colors hover:bg-accent">
-                  <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-2">
+        <Card>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="space-y-2 p-4">
+                {(["s-a", "s-b", "s-c"] as const).map((id) => (
+                  <Skeleton key={id} className="h-8 w-full" />
+                ))}
+              </div>
+            ) : topBuckets.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                No buckets yet —{" "}
+                <button
+                  type="button"
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  create your first bucket
+                </button>
+                .
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {topBuckets.map((b) => (
+                  <li key={b.name} className="flex items-center px-4 py-3">
                     <Package
-                      className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                      className="mr-3 size-4 shrink-0 text-muted-foreground"
                       aria-hidden
                     />
-                    <CardTitle className="truncate text-base font-medium leading-tight">
+                    <Link
+                      to={`/buckets/${b.name}`}
+                      className="truncate text-sm font-medium hover:underline"
+                    >
                       {b.name}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="text-xs text-muted-foreground">
-                      {formatRelativeDate(b.createdAt)}
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute top-2 right-2 z-10 size-8 text-muted-foreground hover:text-foreground"
-                    aria-label={`Bucket ${b.name} actions`}
-                  >
-                    <MoreHorizontal className="size-4" aria-hidden />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onClick={() => setPendingDelete({ name: b.name })}
-                  >
-                    <Trash2 className="mr-2 size-4" aria-hidden />
-                    Delete bucket
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ))}
-        </div>
-      )}
+                    </Link>
+                    <div className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>
+                        {b.objects.toLocaleString()} object
+                        {b.objects === 1 ? "" : "s"}
+                      </span>
+                      <span className="font-mono">{formatBytes(b.bytes)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+          {!isLoading && topBuckets.length > 0 ? (
+            <CardHeader className="border-t">
+              <CardDescription>
+                Showing the {topBuckets.length} largest bucket
+                {topBuckets.length === 1 ? "" : "s"} by size.
+              </CardDescription>
+            </CardHeader>
+          ) : null}
+        </Card>
+      </section>
     </div>
   );
 }

@@ -12,14 +12,27 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { UploadState, UploadStatus } from "@/lib/upload-queue";
+import { formatBytes } from "@/lib/format";
+import type {
+  UploadItem,
+  UploadState,
+  UploadStatus,
+} from "@/lib/upload-queue";
 
-function UploadStatusBadge({ status }: { status: UploadStatus }) {
+function UploadStatusBadge({
+  status,
+  finalizing,
+}: {
+  status: UploadStatus;
+  finalizing: boolean;
+}) {
   const label =
     status === "queued"
       ? "Queued"
       : status === "uploading"
-        ? "Uploading"
+        ? finalizing
+          ? "Finalizing"
+          : "Uploading"
         : status === "success"
           ? "Done"
           : "Error";
@@ -33,6 +46,28 @@ function UploadStatusBadge({ status }: { status: UploadStatus }) {
     <Badge variant={variant} className="shrink-0">
       {label}
     </Badge>
+  );
+}
+
+function UploadProgressDetails({ item }: { item: UploadItem }) {
+  // Once the browser->gateway transfer is complete the gateway is still
+  // forwarding the body to Drime, so we render an indeterminate "Finalizing"
+  // line instead of a stuck "100%".
+  const finalizing = item.progress >= 100;
+  const sent = Math.min(
+    item.file.size,
+    Math.round((item.progress / 100) * item.file.size),
+  );
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-muted-foreground text-xs tabular-nums">
+        <span>{finalizing ? "Finalizing on server…" : `${item.progress}%`}</span>
+        <span className="font-mono">
+          {formatBytes(sent)} / {formatBytes(item.file.size)}
+        </span>
+      </div>
+      <Progress value={item.progress} />
+    </div>
   );
 }
 
@@ -98,16 +133,21 @@ export function UploadQueueSheet({ state, onCancel, onClearCompleted }: Props) {
           {state.items.map((item) => (
             <div
               key={item.id}
-              className="space-y-1 border-border border-b pb-3 last:border-0"
+              className="space-y-2 border-border border-b pb-3 last:border-0"
             >
               <div className="flex items-center justify-between gap-2 text-sm">
                 <span className="truncate font-mono text-xs">
                   {item.relativePath}
                 </span>
-                <UploadStatusBadge status={item.status} />
+                <UploadStatusBadge
+                  status={item.status}
+                  finalizing={
+                    item.status === "uploading" && item.progress >= 100
+                  }
+                />
               </div>
               {item.status === "uploading" ? (
-                <Progress value={item.progress} />
+                <UploadProgressDetails item={item} />
               ) : null}
               {item.status === "error" ? (
                 <p className="text-destructive text-xs">{item.errorMessage}</p>

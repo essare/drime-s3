@@ -50,6 +50,19 @@ export const BucketsResponseSchema = z.object({
 
 export const BucketCreatedSchema = z.object({ name: z.string() });
 
+export const StatsResponseSchema = z.object({
+  buckets: z.number(),
+  totalBytes: z.number(),
+  totalObjects: z.number(),
+  perBucket: z.array(
+    z.object({
+      name: z.string(),
+      bytes: z.number(),
+      objects: z.number(),
+    }),
+  ),
+});
+
 export const ListingSchema = z.object({
   prefix: z.string(),
   delimiter: z.string(),
@@ -90,3 +103,4 @@ export const ErrorEnvelopeSchema = z.object({
 });
 
 export type StatusData = z.infer<typeof StatusSchema>;
+export type StatsData = z.infer<typeof StatsResponseSchema>;
