@@ -51,10 +51,6 @@ services:
 | `WEB_UI_PASSWORD` | Browser admin UI password; defaults to **`changeme`** (change for production) |
 | `WEB_UI_SESSION_SECRET` | Hex session signing key, **at least 32 characters**; defaults to a **dev-only** 64-hex string in the snippet (rotate for production; e.g. `openssl rand -hex 32`) |
 
-Optional: add **`DRIME_GATEWAY_WORKSPACE_ID`** under `environment` with a numeric string to pin the workspace. Change **`image`** to another tag or registry (`ghcr.io/essare/drime-s3:main`, a semver tag, etc.). Change the host side of **`ports`** (e.g. `9000:8081`) if `8081` is already taken on the host.
-
-Treat **`docker-compose.yml` like a secret** once it holds real tokens: do not commit it to a public repository with production values (use a private override file, secret store, or CI variables instead).
-
 Run with **Sig V4 enabled** (default): omit **`DRIME_S3_INSECURE`**. For **local or lab use only**, add `DRIME_S3_INSECURE: "1"` under `environment` so missing S3 keys are auto-generated; **never** expose that on the public internet.
 
 ### 2. Initialize the workspace (once per Drime account / workspace name)
@@ -87,9 +83,9 @@ docker compose down
 
 ## AWS CLI examples
 
-Point the AWS CLI at drime-s3 with **`--endpoint-url`** and set **`AWS_ACCESS_KEY_ID`** / **`AWS_SECRET_ACCESS_KEY`** to the **same `S3_ACCESS_KEY` and `S3_SECRET_KEY` values you chose** in `docker-compose.yml` (they are not looked up anywhere else). The gateway’s default S3 region is **`drime`** (override in config if you changed `[s3].region`).
+Set credentials to the **same `S3_ACCESS_KEY` and `S3_SECRET_KEY` values you chose** in `docker-compose.yml`. The gateway’s default S3 region is **`drime`**.
 
-For **localhost** and custom endpoints, path-style addressing is reliable:
+With **AWS CLI 2.15+**, set a default S3 endpoint once per shell so you do not need **`--endpoint-url`** on every command (adjust host/port if your gateway is not on `127.0.0.1:8081`):
 
 ```bash
 export AWS_ACCESS_KEY_ID="your_chosen_access_key"
@@ -97,50 +93,51 @@ export AWS_SECRET_ACCESS_KEY="your_chosen_secret_key"
 export AWS_DEFAULT_REGION="drime"
 export AWS_EC2_METADATA_DISABLED="true"
 export AWS_USE_PATH_STYLE_ENDPOINT="true"
-
-ENDPOINT="http://127.0.0.1:8081"
+export AWS_ENDPOINT_URL_S3="http://127.0.0.1:8081"
 ```
+
+Older CLIs: add **`--endpoint-url http://127.0.0.1:8081`** to each `aws s3` / `aws s3api` invocation (or upgrade the AWS CLI).
 
 ### List buckets
 
 ```bash
-aws s3 ls --endpoint-url "$ENDPOINT"
+aws s3 ls
 ```
 
 ### Create a bucket (S3 “bucket” = root-level folder in Drime)
 
 ```bash
-aws s3 mb "s3://my-demo-bucket" --endpoint-url "$ENDPOINT"
+aws s3 mb "s3://my-demo-bucket"
 ```
 
 ### Upload and download objects
 
 ```bash
 echo "hello" > /tmp/hello.txt
-aws s3 cp /tmp/hello.txt "s3://my-demo-bucket/hello.txt" --endpoint-url "$ENDPOINT"
-aws s3 cp "s3://my-demo-bucket/hello.txt" - --endpoint-url "$ENDPOINT"
+aws s3 cp /tmp/hello.txt "s3://my-demo-bucket/hello.txt"
+aws s3 cp "s3://my-demo-bucket/hello.txt" -
 ```
 
 ### List objects in a bucket
 
 ```bash
-aws s3 ls "s3://my-demo-bucket/" --endpoint-url "$ENDPOINT"
+aws s3 ls "s3://my-demo-bucket/"
 ```
 
 ### Delete an object and the bucket
 
 ```bash
-aws s3 rm "s3://my-demo-bucket/hello.txt" --endpoint-url "$ENDPOINT"
-aws s3 rb "s3://my-demo-bucket" --endpoint-url "$ENDPOINT"
+aws s3 rm "s3://my-demo-bucket/hello.txt"
+aws s3 rb "s3://my-demo-bucket"
 ```
 
-If `rb` fails because the bucket is not empty, use `aws s3 rb "s3://my-demo-bucket" --force --endpoint-url "$ENDPOINT"` (this deletes all objects under the prefix first).
+If `rb` fails because the bucket is not empty, use `aws s3 rb "s3://my-demo-bucket" --force` (this deletes all objects under the prefix first).
 
 ### Low-level API (optional)
 
 ```bash
-aws s3api list-buckets --endpoint-url "$ENDPOINT"
-aws s3api head-bucket --bucket my-demo-bucket --endpoint-url "$ENDPOINT"
+aws s3api list-buckets
+aws s3api head-bucket --bucket my-demo-bucket
 ```
 
 ---
