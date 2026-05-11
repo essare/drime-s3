@@ -145,7 +145,7 @@ aws s3api head-bucket --bucket my-demo-bucket
 - Set **region** (sometimes labeled *location* or *AWS region*) to **`drime`**. This gateway uses that name in the Sig V4 credential scope; clients that default to **`us-east-1`** will fail with **“The request signature we calculated does not match…”**.
 - Use your gateway URL as the **endpoint** (e.g. `http://192.168.2.33:38280`). Enable **path-style** addressing if the client offers it when using a raw IP or custom port.
 - **Duplicati** and similar tools often send **`x-amz-content-sha256: UNSIGNED-PAYLOAD`** on PUT; images **before v1.0.1** lowercased that header during verification. Use **`v1.0.1`** or newer (or a `main` image built from that fix).
-- **ETag:** some Drime objects have no `md5:` line or `hash` in metadata; older gateways returned **`"unknown"`**, which strict .NET parsers reject (**“Could not find any recognizable digits”**). **v1.0.2+** emits a stable synthetic **32-hex** ETag instead.
+- **ETag:** some Drime objects have no `md5:` line or only an **opaque** `hash` (not 32-char hex); older gateways returned **`"unknown"`** or passed through opaque hashes, which strict .NET parsers reject (**“Could not find any recognizable digits”**). **v1.0.3+** uses **32-hex** from `md5:` / hex `hash`, otherwise a stable synthetic **32-hex** ETag.
 
 ---
 

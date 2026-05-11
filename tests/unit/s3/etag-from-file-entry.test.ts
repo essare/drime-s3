@@ -19,6 +19,14 @@ function entry(partial: Partial<FileEntry>): FileEntry {
 }
 
 describe("etagFromFileEntry", () => {
+  test("uses multipart composite md5 line from description", () => {
+    const hex32 = "abcd".repeat(8);
+    const e = entry({
+      description: `md5:${hex32}-4\n`,
+    });
+    expect(etagFromFileEntry(e)).toBe(`"${hex32}-4"`);
+  });
+
   test("uses md5 line from description", () => {
     const e = entry({
       description: "md5:abcdef0123456789abcdef0123456789\n",
@@ -32,6 +40,19 @@ describe("etagFromFileEntry", () => {
       hash: "fedcba0987654321fedcba0987654321",
     });
     expect(etagFromFileEntry(e)).toBe('"fedcba0987654321fedcba0987654321"');
+  });
+
+  test("ignores opaque non-hex hash (Drime), uses synthetic 32-hex etag", () => {
+    const e = entry({
+      id: 715489694,
+      name: "duplicati-access-privileges-test.tmp",
+      file_size: 84,
+      updated_at: "2026-05-11T21:59:23.000Z",
+      description: null,
+      hash: "NzE1NDg5Njk0fA",
+    });
+    expect(etagFromFileEntry(e)).toMatch(/^"[a-f0-9]{32}"$/);
+    expect(etagFromFileEntry(e)).toBe(etagFromFileEntry(e));
   });
 
   test("synthetic 32-hex etag when no md5 and no hash", () => {

@@ -31,19 +31,21 @@ export function buildObjectDescription(
 /**
  * S3 `ETag` for a `FileEntry` (GET/HEAD/list). Many clients expect a 32-char
  * hex MD5 or a composite multipart form; never emit a non-hex placeholder like
- * `"unknown"` which breaks strict parsers (e.g. Duplicati / .NET).
+ * `"unknown"` which breaks strict parsers (e.g. Duplicati / .NET). Drime may
+ * expose an opaque `hash` (e.g. base64); only use it when it is 32-char hex.
  */
 export function etagFromFileEntry(entry: FileEntry): string {
   const first = entry.description?.split("\n")[0]?.trim() ?? "";
   if (first.startsWith("md5:")) {
-    const hex = first.slice(4).replace(/\s+/g, "");
-    if (/^[a-f0-9]{32}$/i.test(hex)) return `"${hex.toLowerCase()}"`;
-    return `"${hex}"`;
+    const rest = first.slice(4).replace(/\s+/g, "");
+    const lower = rest.toLowerCase();
+    if (/^[a-f0-9]{32}$/.test(lower)) return `"${lower}"`;
+    /** Multipart-style composite ETag persisted by internal uploads: `hex-partCount`. */
+    if (/^[a-f0-9]{32}-\d+$/.test(lower)) return `"${lower}"`;
   }
   const rawHash = entry.hash?.trim().replace(/^"+|"+$/g, "") ?? "";
-  if (rawHash.length > 0) {
-    if (/^[a-f0-9]{32}$/i.test(rawHash)) return `"${rawHash.toLowerCase()}"`;
-    return `"${rawHash}"`;
+  if (rawHash.length > 0 && /^[a-f0-9]{32}$/i.test(rawHash)) {
+    return `"${rawHash.toLowerCase()}"`;
   }
   const fp = createHash("md5")
     .update(
