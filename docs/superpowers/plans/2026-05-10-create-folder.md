@@ -1138,6 +1138,12 @@ export function CreateFolderDialog({
 
   const mutation = useCreateFolder();
 
+  // NOTE (post-implementation): Spec §7.4 prescribes an inline `Alert`
+  // (NOT a toast) for non-field errors. The shipped dialog tracks a
+  // `generalError` string + renders `<Alert variant="destructive">` inside
+  // the form. The snippet below shows the original `toast.error` path for
+  // reference; the actual implementation is in
+  // `web/src/components/objects/create-folder-dialog.tsx`.
   function handleOpenChange(next: boolean) {
     onOpenChange(next);
     if (!next) form.reset({ name: "" });
@@ -1177,10 +1183,10 @@ export function CreateFolderDialog({
                       } else if (e.status === 400) {
                         form.setError("name", { message: e.message });
                       } else {
-                        toast.error(e.message);
+                        toast.error(e.message); // shipped: setGeneralError(e.message)
                       }
                     } else {
-                      toast.error("Network error creating folder");
+                      toast.error("Network error creating folder"); // shipped: setGeneralError("Network error creating folder")
                     }
                   },
                 },
