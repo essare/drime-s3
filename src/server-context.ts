@@ -39,10 +39,14 @@ export type CreateAppContextInput = {
 export async function createAppContext(
   input: CreateAppContextInput,
 ): Promise<AppContext> {
+  const logLevel =
+    process.env.LOG_LEVEL?.trim() ||
+    process.env.PINO_LOG_LEVEL?.trim() ||
+    "info";
   const logger =
     input.logger ??
     pino({
-      level: "info",
+      level: logLevel as pino.LevelWithSilent,
       name: "drime-s3",
     });
   const drime = new DrimeClient({
