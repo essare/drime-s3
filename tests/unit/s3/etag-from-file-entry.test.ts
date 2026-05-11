@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { FileEntry } from "../../../src/drime/types";
-import { etagFromFileEntry } from "../../../src/s3/tagging";
+import { etagFromFileEntry, entryHasStrongContentEtag } from "../../../src/s3/tagging";
 
 function entry(partial: Partial<FileEntry>): FileEntry {
   return {
@@ -25,6 +25,32 @@ describe("etagFromFileEntry", () => {
       description: `md5:${hex32}-4\n`,
     });
     expect(etagFromFileEntry(e)).toBe(`"${hex32}-4"`);
+  });
+
+  test("entryHasStrongContentEtag is false for opaque hash only", () => {
+    const e = entry({
+      description: null,
+      hash: "NzE1NDg5Njk0fA",
+    });
+    expect(entryHasStrongContentEtag(e)).toBe(false);
+  });
+
+  test("entryHasStrongContentEtag is true for md5 line", () => {
+    expect(
+      entryHasStrongContentEtag(
+        entry({ description: "md5:abcdabcdabcdabcdabcdabcdabcdabcd\n" }),
+      ),
+    ).toBe(true);
+  });
+
+  test("entryHasStrongContentEtag is true for hex hash", () => {
+    expect(
+      entryHasStrongContentEtag(
+        entry({
+          hash: "fedcba0987654321fedcba0987654321",
+        }),
+      ),
+    ).toBe(true);
   });
 
   test("uses md5 line from description", () => {

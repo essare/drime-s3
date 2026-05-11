@@ -18,6 +18,7 @@ import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
 import {
   buildObjectDescription,
+  entryHasStrongContentEtag,
   etagFromFileEntry,
   objectTaggingXml,
   parseTaggingLine,
@@ -323,6 +324,32 @@ function pickDownloadResponseHeaders(
   return out;
 }
 
+/** Max object size for buffering GET to compute Content-MD5–matching ETag (env override). */
+function contentEtagBufferMaxBytes(): number {
+  const raw = process.env.DRIME_S3_CONTENT_ETAG_BUFFER_BYTES?.trim();
+  if (!raw) return 64 * 1024 * 1024;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 64 * 1024 * 1024;
+}
+
+/** Full GET (status 200) to derive quoted MD5 ETag; used for HEAD when metadata is weak. */
+async function etagQuotedFromFullDownload(
+  ctx: AppContext,
+  downloadUrl: string,
+): Promise<string | null> {
+  try {
+    const up = await ctx.drime.fetchAuthenticated(downloadUrl, {
+      method: "GET",
+    });
+    if (!up.ok || up.status !== 200) return null;
+    const buf = Buffer.from(await up.arrayBuffer());
+    const md5Hex = createHash("md5").update(buf).digest("hex");
+    return `"${md5Hex}"`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Single-object S3 routes under `/<bucket>/<key>`.
  * @returns `null` when multipart query params should be handled in `handlers/multipart.ts`.
@@ -384,13 +411,22 @@ export async function handleObjectRequest(
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
     const { entry } = resolved;
+    const downloadUrl = resolveDownloadUrl(entry, ctx);
+    let etag = etagFromFileEntry(entry);
+    if (!entryHasStrongContentEtag(entry)) {
+      const sz = entry.file_size ?? 0;
+      if (sz >= 0 && sz <= contentEtagBufferMaxBytes()) {
+        const q = await etagQuotedFromFullDownload(ctx, downloadUrl);
+        if (q !== null) etag = q;
+      }
+    }
     return new Response(null, {
       status: 200,
       headers: {
         "Content-Type": entry.mime ?? "application/octet-stream",
         "Content-Length": String(entry.file_size),
         "Last-Modified": formatHttpDate(entry.updated_at),
-        ETag: etagFromFileEntry(entry),
+        ETag: etag,
         "Accept-Ranges": "bytes",
       },
     });
@@ -425,6 +461,30 @@ export async function handleObjectRequest(
         `Upstream download failed (${upstream.status}): ${t.slice(0, 200)}`,
       );
     }
+
+    const strong = entryHasStrongContentEtag(entry);
+    const maxBuf = contentEtagBufferMaxBytes();
+    const sz = entry.file_size ?? 0;
+    const bufferBody =
+      !range &&
+      upstream.status === 200 &&
+      !strong &&
+      sz >= 0 &&
+      sz <= maxBuf;
+
+    if (bufferBody) {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      const md5Hex = createHash("md5").update(buf).digest("hex");
+      const headers: Record<string, string> = {};
+      const ct = upstream.headers.get("content-type");
+      if (ct) headers["Content-Type"] = ct;
+      headers["Content-Length"] = String(buf.length);
+      headers["Accept-Ranges"] = "bytes";
+      headers["Last-Modified"] = formatHttpDate(entry.updated_at);
+      headers["ETag"] = `"${md5Hex}"`;
+      return new Response(buf, { status: 200, headers });
+    }
+
     const headers = pickDownloadResponseHeaders(upstream);
     headers["Last-Modified"] = formatHttpDate(entry.updated_at);
     headers.ETag = etagFromFileEntry(entry);

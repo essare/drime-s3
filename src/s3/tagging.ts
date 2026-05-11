@@ -56,6 +56,24 @@ export function etagFromFileEntry(entry: FileEntry): string {
   return `"${fp}"`;
 }
 
+/**
+ * Whether {@link etagFromFileEntry} reflects stored object MD5/composite metadata
+ * (not the synthetic fingerprint). If false, GET may still derive ETag from bytes
+ * for small objects so clients can verify Content-MD5 vs ETag.
+ */
+export function entryHasStrongContentEtag(entry: FileEntry): boolean {
+  const first = entry.description?.split("\n")[0]?.trim() ?? "";
+  if (first.startsWith("md5:")) {
+    const rest = first.slice(4).replace(/\s+/g, "");
+    const lower = rest.toLowerCase();
+    if (/^[a-f0-9]{32}$/.test(lower)) return true;
+    if (/^[a-f0-9]{32}-\d+$/.test(lower)) return true;
+    return false;
+  }
+  const rawHash = entry.hash?.trim().replace(/^"+|"+$/g, "") ?? "";
+  return rawHash.length > 0 && /^[a-f0-9]{32}$/i.test(rawHash);
+}
+
 export function parseTaggingLine(description: string | null): string | null {
   if (!description) return null;
   for (const line of description.split("\n")) {

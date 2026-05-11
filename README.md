@@ -145,7 +145,7 @@ aws s3api head-bucket --bucket my-demo-bucket
 - Set **region** (sometimes labeled *location* or *AWS region*) to **`drime`**. This gateway uses that name in the Sig V4 credential scope; clients that default to **`us-east-1`** will fail with **“The request signature we calculated does not match…”**.
 - Use your gateway URL as the **endpoint** (e.g. `http://192.168.2.33:38280`). Enable **path-style** addressing if the client offers it when using a raw IP or custom port.
 - **Duplicati** and similar tools often send **`x-amz-content-sha256: UNSIGNED-PAYLOAD`** on PUT; images **before v1.0.1** lowercased that header during verification. Use **`v1.0.1`** or newer (or a `main` image built from that fix).
-- **ETag:** some Drime objects have no `md5:` line or only an **opaque** `hash` (not 32-char hex); older gateways returned **`"unknown"`** or passed through opaque hashes, which strict .NET parsers reject (**“Could not find any recognizable digits”**). **v1.0.3+** uses **32-hex** from `md5:` / hex `hash`, otherwise a stable synthetic **32-hex** ETag.
+- **ETag:** some Drime objects have no `md5:` line or only an **opaque** `hash` (not 32-char hex); older gateways returned **`"unknown"`** or passed through opaque hashes, which strict .NET parsers reject (**“Could not find any recognizable digits”**). **v1.0.3+** uses **32-hex** from `md5:` / hex `hash`, otherwise a stable synthetic **32-hex** fingerprint for listing—**v1.0.4+** additionally buffers **small** full GETs (and matching HEADs) to set **ETag = MD5(body)** when metadata is weak, so clients like Duplicati can verify **ETag vs downloaded bytes** (override max size with **`DRIME_S3_CONTENT_ETAG_BUFFER_BYTES`**, default 64 MiB).
 
 ---
 
@@ -169,7 +169,7 @@ bun install --frozen-lockfile --cwd web
 - `DRIME_GATEWAY_WORKSPACE_NAME` — optional; default `drime-s3`.
 - `DRIME_S3_INSECURE=1` or `--insecure` — skips Sig V4 verification (**development only**).
 - `DRIME_S3_HTTP_TRACE=1` — log each S3 response (method, path, status, **etag**, content-length, request id, **host**, Sig V4 access key id + credential scope from `Authorization`, **`etagMd5ShapeOk`** when Duplicati-compatible hex matters). Requests whose path contains **`duplicati-access-privileges-test`** set **`duplicatiPrivilegesProbe`: true**.
-- `DRIME_S3_HTTP_TRACE_VERBOSE=1` — with **`DRIME_S3_HTTP_TRACE=1`**, also log the **full response header map** (useful when a proxy strips or rewrites **ETag**).
+- `DRIME_S3_CONTENT_ETAG_BUFFER_BYTES` — optional; max object size (bytes) for buffering **GET** to compute an **MD5 ETag** when Drime metadata has no reliable MD5 (default **64 MiB**). Larger objects still use metadata/synthetic ETags.
 - `LOG_LEVEL` or `PINO_LOG_LEVEL` — Pino log level (`trace`, `debug`, `info`, …); default `info`.
 
 With Sig V4 enabled, set **`S3_ACCESS_KEY`** and **`S3_SECRET_KEY`** to strings **you choose** (they are only for this gateway, not from Drime or AWS), or define `[s3]` in the config file below. For the admin UI, set **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** (hex, at least 32 characters); the Docker Compose example in this README uses **`changeme`** and a fixed dev hex string as defaults.
