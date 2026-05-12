@@ -1,6 +1,6 @@
-# drime-s3 — edit `environment` values below, then:
+# drime-s3 — edit `environment`, then `docker compose up -d`.
+# Workspace: use /_ui/ onboarding ("Initialize workspace") OR run once:
 #   docker compose run --rm drime-s3 init
-#   docker compose up -d
 
 services:
   drime-s3:
