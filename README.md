@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" width="120" height="120" alt="drime-s3 logo" />
+  <img src="docs/images/drime-s3-logo.png" width="160" alt="drime-s3 logo" />
 </p>
 
 <h1 align="center">drime-s3</h1>
