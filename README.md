@@ -1,16 +1,37 @@
-# drime-s3
+<p align="center">
+  <img src="docs/images/logo.svg" width="120" height="120" alt="drime-s3 logo" />
+</p>
 
-**S3-compatible gateway for [Drime Cloud](https://drime.cloud).** Root folders in a Drime workspace become **buckets**; keys and objects behave like S3. Use **AWS CLI**, SDKs, or tools such as Duplicati against your own endpoint, plus a small **web admin UI** at `/_ui/`.
+<h1 align="center">drime-s3</h1>
 
-Built with **TypeScript** on **[Bun](https://bun.sh)**. Ships as **Docker images** (Docker Hub and GHCR) and a compiled binary with the UI embedded.
+<p align="center">
+  <strong>S3-compatible gateway for <a href="https://drime.cloud">Drime Cloud</a></strong><br />
+  TypeScript · <a href="https://bun.sh">Bun</a> · Docker · Web admin UI
+</p>
+
+<p align="center">
+  <a href="https://github.com/essare/drime-s3/actions/workflows/docker-publish.yml"><img src="https://github.com/essare/drime-s3/actions/workflows/docker-publish.yml/badge.svg" alt="Docker publish CI" /></a>
+  <a href="https://hub.docker.com/r/essayoub/drime-s3"><img src="https://img.shields.io/docker/v/essayoub/drime-s3/latest?label=Docker%20Hub&logo=docker" alt="Docker Hub version" /></a>
+  <a href="https://github.com/essare/drime-s3/pkgs/container/drime-s3"><img src="https://img.shields.io/badge/ghcr.io-package-blue?logo=github" alt="GitHub Container Registry" /></a>
+  <a href="https://github.com/essare/drime-s3/blob/main/package.json"><img src="https://img.shields.io/badge/Bun-1.3-000?logo=bun&logoColor=white" alt="Bun 1.3" /></a>
+</p>
 
 ---
 
-## Try it quickly (Docker)
+## Features
+
+- **S3-shaped API** — workspace root folders are **buckets**; objects, listing, uploads, and common operations work like S3.
+- **Sig V4** — AWS CLI, SDKs, and tools such as **Duplicati** / **restic** can use your gateway with a custom endpoint and region **`drime`**.
+- **Web admin UI** — manage workspace init, buckets, objects, and uploads at **`/_ui/`** (set `WEB_UI_PASSWORD` + `WEB_UI_SESSION_SECRET` outside dev).
+- **Docker-first** — images on **Docker Hub** (`essayoub/drime-s3`) and **GHCR** (`ghcr.io/essare/drime-s3`); compose file in the repo root.
+
+---
+
+## Run in Docker
 
 1. Copy **[`docker-compose.yml`](./docker-compose.yml)** and set at least:
    - **`DRIME_API_KEY`** — from your Drime account  
-   - **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** — *any* secret strings **you** choose (for Sig V4 to this gateway only; not AWS keys)
+   - **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** — secret strings **you** choose (Sig V4 to this gateway only; not AWS keys)
 2. Run:
 
 ```bash
@@ -18,36 +39,13 @@ docker compose run --rm drime-s3 init   # once: create workspace in Drime
 docker compose up -d                   # gateway + UI on host port 8081 by default
 ```
 
-3. Open **`http://127.0.0.1:8081/_ui/`** (adjust host/port if you changed `ports:`). Change **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** before anything public-facing.
+3. Open **`http://127.0.0.1:8081/_ui/`** (adjust host/port if you changed `ports:`). Rotate **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** before anything public-facing.
 
-**Images:** `docker.io/essayoub/drime-s3` and `ghcr.io/<owner>/drime-s3` — tags like **`main`**, **`v1.x.x`**.
-
----
-
-## Run from source
-
-Requires **Bun 1.3.x**.
-
-```bash
-git clone https://github.com/essare/drime-s3.git && cd drime-s3
-bun install --frozen-lockfile
-bun install --frozen-lockfile --cwd web
-```
-
-Put **`DRIME_API_KEY`** in a `.env` file (optional **`S3_ACCESS_KEY`**, **`S3_SECRET_KEY`**, **`WEB_UI_PASSWORD`**, **`WEB_UI_SESSION_SECRET`**). For local dev only you can use **`DRIME_S3_INSECURE=1`** to skip Sig V4 (never on the public internet).
-
-```bash
-bun run src/cli/main.ts init
-bun run start              # http://127.0.0.1:8081
-# bun run dev              # hot reload
-# bun run web:dev          # UI only (Vite)
-```
-
-Optional config file: **`~/.config/drime-s3/config.toml`**. Env vars override file values; see **`src/config.ts`** for the full list.
+**Images:** `docker.io/essayoub/drime-s3` and `ghcr.io/essare/drime-s3` — tags like **`main`**, **`v1.x.x`**.
 
 ---
 
-## AWS CLI (quick)
+## Try with AWS CLI
 
 Use region **`drime`**, path-style, and your gateway URL.
 
@@ -64,8 +62,6 @@ export AWS_ENDPOINT_URL_S3="http://127.0.0.1:8081"
 
 **Older CLI:** add **`--endpoint-url http://127.0.0.1:8081`** to each command.
 
-Examples:
-
 ```bash
 aws s3 ls
 aws s3 mb s3://my-bucket
@@ -75,21 +71,30 @@ aws s3 cp s3://my-bucket/h.txt -
 
 If **`aws s3 rb`** says the bucket is not empty, empty it first or use **`--force`**.
 
----
-
-## Other S3 clients
-
-- **Region** must be **`drime`** (not `us-east-1`) or Sig V4 will fail.
-- Set the **custom S3 endpoint** to your gateway (hostname + port). With **HTTP**, use a **custom server / hostname** field without duplicating `https://` if the UI adds TLS separately.
-- **Docker → host gateway:** often **`http://host.docker.internal:<port>`** (macOS/Windows Docker Desktop).
-
-Use a **recent image** (e.g. **≥ v1.0.4**) if you rely on Duplicati or strict ETag checks.
+**Other clients:** set the **custom S3 endpoint** to your gateway; from Docker on the host, **`http://host.docker.internal:<port>`** often works. Prefer a **recent release** (e.g. **≥ v1.0.4**) for strict ETag clients such as Duplicati.
 
 ---
 
-## Debugging & advanced env
+## Run from source
 
-For tracing S3 responses (status, ETag, path): **`DRIME_S3_HTTP_TRACE=1`**; add **`DRIME_S3_HTTP_TRACE_VERBOSE=1`** for full response headers. **`LOG_LEVEL`**, **`DRIME_S3_PORT`**, **`DRIME_S3_CONTENT_ETAG_BUFFER_BYTES`**, etc. are documented in **`src/config.ts`** and **`.env.example`**.
+Requires **Bun 1.3.x**.
+
+```bash
+git clone https://github.com/essare/drime-s3.git && cd drime-s3
+bun install --frozen-lockfile
+bun install --frozen-lockfile --cwd web
+```
+
+Put **`DRIME_API_KEY`** in **`.env`** (optional **`S3_ACCESS_KEY`**, **`S3_SECRET_KEY`**, **`WEB_UI_PASSWORD`**, **`WEB_UI_SESSION_SECRET`**). For local dev only, **`DRIME_S3_INSECURE=1`** skips Sig V4 (never on the public internet).
+
+```bash
+bun run src/cli/main.ts init
+bun run start              # http://127.0.0.1:8081
+# bun run dev              # hot reload
+# bun run web:dev          # UI only (Vite)
+```
+
+Optional **`~/.config/drime-s3/config.toml`**. Full env list: **`src/config.ts`** and **`.env.example`**. S3 trace logging: **`DRIME_S3_HTTP_TRACE=1`** (add **`DRIME_S3_HTTP_TRACE_VERBOSE=1`** for response headers).
 
 ---
 
