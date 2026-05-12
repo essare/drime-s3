@@ -33,8 +33,6 @@ Save the following as **`docker-compose.yml`** (same as [`docker-compose.yml`](.
 
 ```yaml
 # drime-s3 — edit `environment`, then `docker compose up -d`.
-# Workspace creation: use /_ui/ onboarding ("Initialize workspace") OR run once:
-#   docker compose run --rm drime-s3 init   # same as UI; optional if you use the UI
 
 services:
   drime-s3:
@@ -60,12 +58,6 @@ Then:
 
 ```bash
 docker compose up -d                    # gateway + UI on host port 8081 by default
-```
-
-Create the gateway workspace in Drime **either** from **/_ui/** (onboarding → **Initialize workspace**) **or** once with the same logic and no browser:
-
-```bash
-docker compose run --rm drime-s3 init   # optional; same as POST /_admin/init in the UI
 ```
 
 Open **`http://127.0.0.1:8081/_ui/`** (adjust host/port if you changed `ports:`).
