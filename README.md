@@ -22,24 +22,48 @@
 
 - **S3-shaped API** — workspace root folders are **buckets**; objects, listing, uploads, and common operations work like S3.
 - **Sig V4** — AWS CLI, SDKs, and tools such as **Duplicati** / **restic** can use your gateway with a custom endpoint and region **`drime`**.
-- **Web admin UI** — manage workspace init, buckets, objects, and uploads at **`/_ui/`** (set `WEB_UI_PASSWORD` + `WEB_UI_SESSION_SECRET` outside dev).
-- **Docker-first** — images on **Docker Hub** (`essayoub/drime-s3`) and **GHCR** (`ghcr.io/essare/drime-s3`); compose file in the repo root.
+- **Web admin UI** — manage workspace init, buckets, objects, and uploads at **`/_ui/`**.
+- **Docker-first** — images on **Docker Hub** and **GHCR**.
 
 ---
 
 ## Run in Docker
 
-1. Copy **[`docker-compose.yml`](./docker-compose.yml)** and set at least:
-   - **`DRIME_API_KEY`** — from your Drime account  
-   - **`S3_ACCESS_KEY`** / **`S3_SECRET_KEY`** — secret strings **you** choose (Sig V4 to this gateway only; not AWS keys)
-2. Run:
+Save the following as **`docker-compose.yml`** (same as [`docker-compose.yml`](./docker-compose.yml) in this repository), then edit **`DRIME_API_KEY`**, **`S3_ACCESS_KEY`**, and **`S3_SECRET_KEY`**.
+
+```yaml
+# drime-s3 — edit `environment` values below, then:
+#   docker compose run --rm drime-s3 init
+#   docker compose up -d
+
+services:
+  drime-s3:
+    image: docker.io/essayoub/drime-s3:main
+    container_name: drime-s3
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      DRIME_API_KEY: "YOUR_DRIME_API_TOKEN"
+      DRIME_API_BASE_URL: "https://app.drime.cloud/api/v1"
+      DRIME_GATEWAY_WORKSPACE_NAME: "drime-s3"
+      # Pick any secret strings; clients use them for Sig V4 here — not from Drime or AWS
+      S3_ACCESS_KEY: "YOUR_S3_ACCESS_KEY"
+      S3_SECRET_KEY: "YOUR_S3_SECRET_KEY"
+      # Dev defaults — change before production
+      WEB_UI_PASSWORD: "changeme"
+      # Dev default only — rotate in production (64 hex chars = 32 bytes)
+      WEB_UI_SESSION_SECRET: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+```
+
+Then run:
 
 ```bash
 docker compose run --rm drime-s3 init   # once: create workspace in Drime
-docker compose up -d                   # gateway + UI on host port 8081 by default
+docker compose up -d                    # gateway + UI on host port 8081 by default
 ```
 
-3. Open **`http://127.0.0.1:8081/_ui/`** (adjust host/port if you changed `ports:`). Rotate **`WEB_UI_PASSWORD`** and **`WEB_UI_SESSION_SECRET`** before anything public-facing.
+Open **`http://127.0.0.1:8081/_ui/`** (adjust host/port if you changed `ports:`).
 
 **Images:** `docker.io/essayoub/drime-s3` and `ghcr.io/essare/drime-s3` — tags like **`main`**, **`v1.x.x`**.
 
