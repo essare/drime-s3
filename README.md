@@ -36,7 +36,7 @@ Save the following as **`docker-compose.yml`** (same as [`docker-compose.yml`](.
 
 services:
   drime-s3:
-    image: docker.io/essayoub/drime-s3:main
+    image: docker.io/essayoub/drime-s3:latest
     container_name: drime-s3
     restart: unless-stopped
     ports:
