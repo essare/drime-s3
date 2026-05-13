@@ -4,6 +4,7 @@ import { dispatchUiAssets } from "../admin/ui-assets";
 import { hasPresignedAuth, verifyPresignedUrl } from "../auth/presigned";
 import { verifySignatureV4 } from "../auth/sigv4";
 import type { AppContext } from "../server-context";
+import { PACKAGE_VERSION } from "../version";
 import { s3ErrorXml } from "./errors";
 import { handleBucketOnly } from "./handlers/bucket";
 import { handleMultipartRequest } from "./handlers/multipart";
@@ -17,9 +18,22 @@ function normalizePathname(url: URL): string {
   return p.startsWith("/") ? p : `/${p}`;
 }
 
-function isLocalHealthHost(host: string): boolean {
+/** Loopback, localhost name, or RFC1918 / full 127/8 IPv4 (typical LAN / Docker access). */
+function isAllowedHealthHost(host: string): boolean {
   const h = host.split(":")[0]?.toLowerCase() ?? "";
-  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  const c = Number(m[3]);
+  const d = Number(m[4]);
+  if ([a, b, c, d].some((n) => n > 255)) return false;
+  if (a === 127) return true;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
 }
 
 function isBucketOrObjectPath(pathname: string): boolean {
@@ -165,10 +179,12 @@ export async function dispatch(
 
   if (method === "GET" && pathname === "/_health") {
     const host = req.headers.get("host") ?? "";
-    if (!isLocalHealthHost(host)) {
+    if (!isAllowedHealthHost(host)) {
       return new Response("Not Found", { status: 404 });
     }
     const body = JSON.stringify({
+      status: "ok",
+      version: PACKAGE_VERSION,
       folderPathCache: ctx.folderCache.size,
       listTtlCache: ctx.listCache.size,
       listTtlInflight: ctx.listCache.inflightSize,

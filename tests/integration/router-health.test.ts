@@ -62,6 +62,9 @@ describe("S3 router", () => {
       const res = await dispatch(ctx, req);
       expect(res.status).toBe(200);
       const j = (await res.json()) as Record<string, unknown>;
+      expect(j.status).toBe("ok");
+      expect(j.version).toBeDefined();
+      expect(typeof j.version).toBe("string");
       expect(typeof j.folderPathCache).toBe("number");
       expect(typeof j.listTtlCache).toBe("number");
       expect(typeof j.multipartSessions).toBe("number");
@@ -69,6 +72,41 @@ describe("S3 router", () => {
       const w = j.webUi as { passwordSet: boolean; activeSessions: number };
       expect(typeof w.passwordSet).toBe("boolean");
       expect(typeof w.activeSessions).toBe("number");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("GET /_health returns cache sizes on private LAN host", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const req = new Request("http://192.168.1.10:8081/_health", {
+        headers: { Host: "192.168.1.10:8081" },
+      });
+      const res = await dispatch(ctx, req);
+      expect(res.status).toBe(200);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("GET /_health is 404 for non-private Host", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const req = new Request("http://8.8.8.8:8081/_health", {
+        headers: { Host: "8.8.8.8:8081" },
+      });
+      const res = await dispatch(ctx, req);
+      expect(res.status).toBe(404);
+      expect(await res.text()).toBe("Not Found");
     } finally {
       mock.stop();
     }
