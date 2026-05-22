@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Database,
   HardDrive,
+  Loader2,
   Package,
   Plus,
   RotateCw,
@@ -92,11 +93,17 @@ function DashboardBlocked({
         disabled={retrying}
         aria-busy={retrying}
       >
-        <RotateCw
-          className={`size-4 ${retrying ? "animate-spin" : ""}`}
-          aria-hidden
-        />
-        Retry
+        {retrying ? (
+          <>
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+            Retrying…
+          </>
+        ) : (
+          <>
+            <RotateCw className="size-4" aria-hidden />
+            Retry
+          </>
+        )}
       </Button>
     </div>
   );

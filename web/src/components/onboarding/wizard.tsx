@@ -72,15 +72,12 @@ export function OnboardingWizard() {
               ? status.error.message
               : "Unknown error"}
           </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
+          <RetryButton
             className="w-fit"
+            size="sm"
+            retrying={status.isFetching}
             onClick={() => void status.refetch()}
-          >
-            Retry
-          </Button>
+          />
         </AlertDescription>
       </Alert>
     );
@@ -222,6 +219,7 @@ export function OnboardingWizard() {
           drimeOk={drimeOk}
           wsOk={wsOk}
           isInitializing={init.isPending}
+          isRetrying={status.isFetching}
           onContinue={() => setCurrentStep((s) => Math.min(TOTAL_STEPS, s + 1))}
           onRetry={() => void status.refetch()}
           onInit={() => void init.mutate()}
@@ -336,12 +334,49 @@ function EnvBadge({ label, set }: { label: string; set: boolean }) {
   );
 }
 
+function RetryButton({
+  onClick,
+  retrying,
+  size = "default",
+  className,
+}: {
+  onClick: () => void;
+  retrying: boolean;
+  size?: "default" | "sm";
+  className?: string;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size={size}
+      className={className}
+      onClick={onClick}
+      disabled={retrying}
+      aria-busy={retrying}
+    >
+      {retrying ? (
+        <>
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Retrying…
+        </>
+      ) : (
+        <>
+          <RotateCw className="size-4" aria-hidden />
+          Retry
+        </>
+      )}
+    </Button>
+  );
+}
+
 function PrimaryAction({
   step,
   envOk,
   drimeOk,
   wsOk,
   isInitializing,
+  isRetrying,
   onContinue,
   onRetry,
   onInit,
@@ -351,6 +386,7 @@ function PrimaryAction({
   drimeOk: boolean;
   wsOk: boolean;
   isInitializing: boolean;
+  isRetrying: boolean;
   onContinue: () => void;
   onRetry: () => void;
   onInit: () => void;
@@ -364,12 +400,7 @@ function PrimaryAction({
         </Button>
       );
     }
-    return (
-      <Button type="button" onClick={onRetry}>
-        <RotateCw className="size-4" />
-        Retry
-      </Button>
-    );
+    return <RetryButton retrying={isRetrying} onClick={onRetry} />;
   }
 
   if (step === 2) {
@@ -381,12 +412,7 @@ function PrimaryAction({
         </Button>
       );
     }
-    return (
-      <Button type="button" onClick={onRetry}>
-        <RotateCw className="size-4" />
-        Retry
-      </Button>
-    );
+    return <RetryButton retrying={isRetrying} onClick={onRetry} />;
   }
 
   if (wsOk) {

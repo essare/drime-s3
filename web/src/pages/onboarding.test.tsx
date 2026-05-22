@@ -239,6 +239,80 @@ describe("OnboardingPage", () => {
     expect(initCalls.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("disables Retry and shows Retrying while status refetch is in flight", async () => {
+    let statusCalls = 0;
+    let releasePending: (() => void) | undefined;
+
+    globalThis.fetch = installAdminFetch({
+      status: () => {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return Promise.resolve(
+            jsonResponse({
+              env: {
+                drimeApiKeySet: true,
+                drimeApiBaseUrl: "https://drime.example",
+                s3KeysSet: true,
+                region: "drime",
+                webUiPasswordSet: true,
+              },
+              drime: {
+                reachable: false,
+                latencyMs: 4,
+                error: "connection refused",
+              },
+              workspace: { name: "gw", id: null, exists: false },
+            }),
+          );
+        }
+        return new Promise<Response>((resolve) => {
+          releasePending = () =>
+            resolve(
+              jsonResponse({
+                env: {
+                  drimeApiKeySet: true,
+                  drimeApiBaseUrl: "https://drime.example",
+                  s3KeysSet: true,
+                  region: "drime",
+                  webUiPasswordSet: true,
+                },
+                drime: {
+                  reachable: false,
+                  latencyMs: 4,
+                  error: "connection refused",
+                },
+                workspace: { name: "gw", id: null, exists: false },
+              }),
+            );
+        });
+      },
+    });
+
+    const user = userEvent.setup();
+    const client = createTestQueryClient();
+    renderWithProviders(
+      <MemoryRouter>
+        <OnboardingPage />
+      </MemoryRouter>,
+      client,
+    );
+
+    const retry = await screen.findByRole("button", { name: /^retry$/i });
+    await user.click(retry);
+
+    expect(
+      await screen.findByRole("button", { name: /retrying/i }),
+    ).toBeDisabled();
+
+    releasePending?.();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^retry$/i }),
+      ).not.toBeDisabled();
+    });
+  });
+
   it("Back button navigates to the previous step", async () => {
     globalThis.fetch = installAdminFetch({
       status: () =>
