@@ -189,6 +189,72 @@ describe("DashboardPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows Retrying on blocked dashboard while status refetch is in flight", async () => {
+    const user = userEvent.setup();
+    let statusCalls = 0;
+    let releasePending: (() => void) | undefined;
+
+    mockFetchByUrl({
+      "/_admin/status": () => {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return jsonResponse({
+            env: {
+              drimeApiKeySet: true,
+              drimeApiBaseUrl: "https://drime.example",
+              s3KeysSet: true,
+              region: "drime",
+              webUiPasswordSet: true,
+            },
+            drime: { reachable: false, latencyMs: 3000, error: "timeout" },
+            workspace: { name: "drime_admin", id: null, exists: false },
+          });
+        }
+        return new Promise<Response>((resolve) => {
+          releasePending = () =>
+            resolve(
+              jsonResponse({
+                env: {
+                  drimeApiKeySet: true,
+                  drimeApiBaseUrl: "https://drime.example",
+                  s3KeysSet: true,
+                  region: "drime",
+                  webUiPasswordSet: true,
+                },
+                drime: { reachable: false, latencyMs: 3000, error: "timeout" },
+                workspace: { name: "drime_admin", id: null, exists: false },
+              }),
+            );
+        });
+      },
+      "/_admin/stats": () =>
+        jsonResponse({ error: { code: "Boom", message: "boom" } }, 503),
+    });
+
+    const client = createTestQueryClient();
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <DashboardPage />
+      </MemoryRouter>,
+      client,
+    );
+
+    const retry = await screen.findByRole("button", { name: /^retry$/i });
+    await user.click(retry);
+
+    expect(
+      await screen.findByRole("button", { name: /retrying/i }),
+    ).toBeDisabled();
+
+    releasePending?.();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^retry$/i }),
+      ).not.toBeDisabled();
+    });
+  });
+
   it("shows blocking error when Drime is unreachable", async () => {
     mockFetchByUrl({
       "/_admin/status": () =>

@@ -1,12 +1,7 @@
-import {
-  ArrowLeft,
-  ArrowRight,
-  CircleCheck,
-  Loader2,
-  RotateCw,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleCheck, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
+import { RetryButton } from "@/components/feedback/retry-button";
 import { useInitMutation } from "@/components/onboarding/use-init-mutation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +16,7 @@ type StepIconState = "ok" | "todo" | "idle";
 const TOTAL_STEPS = 3;
 
 export function OnboardingWizard() {
+  const [retryInFlight, setRetryInFlight] = useState(false);
   const session = useSessionQuery();
   const init = useInitMutation();
   const status = useStatusQuery({
@@ -38,6 +34,13 @@ export function OnboardingWizard() {
   const envOk = status.data?.env.drimeApiKeySet === true;
   const drimeOk = status.data?.drime.reachable === true;
   const wsOk = status.data?.workspace.exists === true;
+
+  const isRetrying = retryInFlight || status.isFetching || status.isRefetching;
+
+  const handleStatusRetry = () => {
+    setRetryInFlight(true);
+    void status.refetch().finally(() => setRetryInFlight(false));
+  };
 
   // Auto-advance forward as the underlying checks turn green.
   // Never auto-walk backwards: if the user navigated back to inspect a
@@ -75,8 +78,8 @@ export function OnboardingWizard() {
           <RetryButton
             className="w-fit"
             size="sm"
-            retrying={status.isFetching}
-            onClick={() => void status.refetch()}
+            retrying={isRetrying}
+            onClick={handleStatusRetry}
           />
         </AlertDescription>
       </Alert>
@@ -219,9 +222,9 @@ export function OnboardingWizard() {
           drimeOk={drimeOk}
           wsOk={wsOk}
           isInitializing={init.isPending}
-          isRetrying={status.isFetching}
+          isRetrying={isRetrying}
           onContinue={() => setCurrentStep((s) => Math.min(TOTAL_STEPS, s + 1))}
-          onRetry={() => void status.refetch()}
+          onRetry={handleStatusRetry}
           onInit={() => void init.mutate()}
         />
       </div>
@@ -331,42 +334,6 @@ function EnvBadge({ label, set }: { label: string; set: boolean }) {
         {set ? "Set" : "Missing"}
       </Badge>
     </li>
-  );
-}
-
-function RetryButton({
-  onClick,
-  retrying,
-  size = "default",
-  className,
-}: {
-  onClick: () => void;
-  retrying: boolean;
-  size?: "default" | "sm";
-  className?: string;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size={size}
-      className={className}
-      onClick={onClick}
-      disabled={retrying}
-      aria-busy={retrying}
-    >
-      {retrying ? (
-        <>
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-          Retrying…
-        </>
-      ) : (
-        <>
-          <RotateCw className="size-4" aria-hidden />
-          Retry
-        </>
-      )}
-    </Button>
   );
 }
 

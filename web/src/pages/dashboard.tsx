@@ -3,16 +3,15 @@ import {
   AlertCircle,
   Database,
   HardDrive,
-  Loader2,
   Package,
   Plus,
-  RotateCw,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { CreateBucketDialog } from "@/components/buckets/create-bucket-dialog";
+import { RetryButton } from "@/components/feedback/retry-button";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -86,25 +85,7 @@ function DashboardBlocked({
           {copy.description}
         </p>
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        onClick={onRetry}
-        disabled={retrying}
-        aria-busy={retrying}
-      >
-        {retrying ? (
-          <>
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Retrying…
-          </>
-        ) : (
-          <>
-            <RotateCw className="size-4" aria-hidden />
-            Retry
-          </>
-        )}
-      </Button>
+      <RetryButton onClick={onRetry} retrying={retrying} />
     </div>
   );
 }
@@ -167,6 +148,7 @@ function StatCard({
 
 export default function DashboardPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [retryInFlight, setRetryInFlight] = useState(false);
   const statsQuery = useStatsQuery();
   const statusQuery = useStatusQuery();
 
@@ -175,10 +157,18 @@ export default function DashboardPage() {
     statusQuery.isError ||
     (statusQuery.data !== undefined && !statusQuery.data.drime.reachable);
 
-  const retrying = statsQuery.isFetching || statusQuery.isFetching;
+  const retrying =
+    retryInFlight ||
+    statsQuery.isFetching ||
+    statusQuery.isFetching ||
+    statsQuery.isRefetching ||
+    statusQuery.isRefetching;
 
   const handleRetry = () => {
-    void Promise.all([statsQuery.refetch(), statusQuery.refetch()]);
+    setRetryInFlight(true);
+    void Promise.all([statsQuery.refetch(), statusQuery.refetch()]).finally(
+      () => setRetryInFlight(false),
+    );
   };
 
   if (blocked) {
