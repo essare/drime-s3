@@ -10,21 +10,24 @@ Use these steps to manually verify the dashboard blocking error + **Retry** UI.
 
 ## A — Drime API unavailable (recommended)
 
-This matches production when Drime is down, times out, or refuses connections.
+The gateway **starts even when Drime is down** (workspace id may be `null` until Drime is reachable again). Status still calls Drime on each request and reports `reachable: false`.
 
-1. **Stop** the running gateway (`Ctrl+C` on `bun run start`).
-2. In `.env`, set a dead base URL (nothing listening):
+1. In `.env`, point Drime at a closed port (nothing listening):
 
    ```env
    DRIME_API_BASE_URL=http://127.0.0.1:9
    ```
 
-3. Start the gateway again: `bun run start`
-4. Open **Dashboard** in the UI.
+   Keep your real `DRIME_API_KEY` and `WEB_UI_PASSWORD`. You do **not** need to change `DRIME_GATEWAY_WORKSPACE_ID` for this test.
 
-**Expected:** centered **Drime API unavailable**, error detail, **Retry** button. No stat cards or “Top buckets”.
+2. Start (or restart) the gateway: `bun run start`  
+   You may see a **warn** log: `gateway workspace not resolved at startup` — that is expected.
 
-5. Restore a real URL (remove the line or set `https://app.drime.cloud/api/v1`), restart gateway, click **Retry** (or refresh).
+3. Open **Dashboard** in the UI.
+
+**Expected:** centered **Drime API unavailable**, error detail (e.g. connection refused), **Retry** button. No stat cards or “Top buckets”.
+
+4. Restore Drime: remove the line or set `DRIME_API_BASE_URL=https://app.drime.cloud/api/v1`, restart the gateway, click **Retry**.
 
 ## B — Gateway not reachable
 
@@ -35,7 +38,7 @@ This matches production when Drime is down, times out, or refuses connections.
 
 ## C — Stats failure only (optional)
 
-Harder to trigger without breaking status. Useful check: stop gateway during an in-flight stats request, or use an uninitialized workspace (`503` on `/_admin/stats` before `POST /_admin/init`).
+With Drime up but workspace not initialized (`gatewayWorkspaceId` null and no init), `GET /_admin/stats` returns **503** while status may still load — dashboard shows **Could not load workspace stats**.
 
 ## Quick API check (no browser)
 

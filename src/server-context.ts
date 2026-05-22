@@ -8,11 +8,7 @@ import {
 import { FolderPathCache } from "./cache/folder-paths";
 import { ListTtlCache } from "./cache/list-ttl";
 import type { AppConfig } from "./config";
-import {
-  DrimeClient,
-  type DrimeFetchFn,
-  GatewayWorkspaceError,
-} from "./drime/client";
+import { DrimeClient, type DrimeFetchFn } from "./drime/client";
 import { MultipartSessionStore } from "./multipart/session-store";
 
 export type AppContext = {
@@ -62,11 +58,8 @@ export async function createAppContext(
       pinnedId: input.config.drime.gatewayWorkspaceId,
     });
   } catch (e) {
-    if (e instanceof GatewayWorkspaceError) {
-      logger.warn({ err: e.message }, "gateway workspace not resolved");
-    } else {
-      throw e;
-    }
+    const message = e instanceof Error ? e.message : String(e);
+    logger.warn({ err: message }, "gateway workspace not resolved at startup");
   }
 
   let webUi: WebUiState;
