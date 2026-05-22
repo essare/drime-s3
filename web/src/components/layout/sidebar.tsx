@@ -1,20 +1,8 @@
-import { LayoutDashboard, Package } from "lucide-react";
-import type { ComponentType, SVGProps } from "react";
 import { NavLink } from "react-router-dom";
 
 import { Logo } from "@/components/branding/logo";
+import { NAV_ITEMS } from "@/components/layout/nav-items";
 import { cn } from "@/lib/utils";
-
-type NavItem = {
-  to: string;
-  label: string;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
-};
-
-const NAV_ITEMS: readonly NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/buckets", label: "Buckets", icon: Package },
-];
 
 export function Sidebar() {
   return (

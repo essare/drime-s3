@@ -1,3 +1,4 @@
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { Button } from "@/components/ui/button";
 import { useLogout } from "@/hooks/use-logout";
 
@@ -10,7 +11,8 @@ export function Topbar({ title }: TopbarProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-6">
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <MobileNav />
         {title ? (
           <h1 className="truncate text-sm font-medium">{title}</h1>
         ) : null}
