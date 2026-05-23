@@ -504,14 +504,22 @@ async function resolvePrefixUnder(
 ): Promise<{ folderId: number; entry: FileEntry } | "missing"> {
   const trimmed = prefix.replace(/^\/+|\/+$/g, "");
   if (trimmed.length === 0) {
-    const entries = await ctx.listCache.getOrFetch(bucketRootId, () =>
-      ctx.drime.listFolder(bucketRootId, W),
-    );
-    const root =
-      entries.find((e) => e.id === bucketRootId) ??
-      entries.find((e) => e.is_folder);
-    if (!root) return "missing";
-    return { folderId: bucketRootId, entry: root };
+    return {
+      folderId: bucketRootId,
+      entry: {
+        id: bucketRootId,
+        name: "",
+        parent_id: null,
+        is_folder: true,
+        file_size: 0,
+        hash: null,
+        mime: null,
+        updated_at: null,
+        created_at: null,
+        description: null,
+        url: null,
+      },
+    };
   }
   const parts = trimmed.split("/").filter(Boolean);
   let currentId = bucketRootId;
