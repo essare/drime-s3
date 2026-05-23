@@ -11,10 +11,16 @@ export type AdminObject = {
   etag: string;
 };
 
+export type AdminFolder = {
+  prefix: string;
+  lastModified: string;
+};
+
 export type AdminListing = {
   prefix: string;
   delimiter: string;
   objects: AdminObject[];
+  folders: AdminFolder[];
   commonPrefixes: string[];
   isTruncated: boolean;
   nextToken: string | null;
@@ -138,38 +144,42 @@ async function listWithDelimiter(
   W: number,
   folderId: number,
   basePrefix: string,
-): Promise<{ contents: ListBucketEntry[]; prefixes: string[] }> {
+): Promise<{ contents: ListBucketEntry[]; folders: AdminFolder[] }> {
   const entries = await ctx.listCache.getOrFetch(folderId, () =>
     ctx.drime.listFolder(folderId, W),
   );
   const contents: ListBucketEntry[] = [];
-  const prefixes: string[] = [];
+  const folders: AdminFolder[] = [];
   for (const entry of entries) {
     const fullKey = basePrefix ? `${basePrefix}${entry.name}` : entry.name;
     if (entry.is_folder) {
-      prefixes.push(`${fullKey}/`);
+      folders.push({
+        prefix: `${fullKey}/`,
+        lastModified: formatIso(entry.updated_at),
+      });
     } else {
       contents.push(toContent(entry, fullKey));
     }
   }
-  return { contents, prefixes };
+  return { contents, folders };
 }
 
 type Row =
   | { kind: "c"; sortKey: string; content: ListBucketEntry }
-  | { kind: "p"; sortKey: string; prefix: string };
+  | { kind: "p"; sortKey: string; prefix: string; lastModified: string };
 
-function mergeRows(contents: ListBucketEntry[], prefixes: string[]): Row[] {
+function mergeRows(contents: ListBucketEntry[], folders: AdminFolder[]): Row[] {
   const rows: Row[] = [
     ...contents.map((c) => ({
       kind: "c" as const,
       sortKey: c.Key,
       content: c,
     })),
-    ...prefixes.map((p) => ({
+    ...folders.map((f) => ({
       kind: "p" as const,
-      sortKey: p,
-      prefix: p,
+      sortKey: f.prefix,
+      prefix: f.prefix,
+      lastModified: f.lastModified,
     })),
   ];
   rows.sort((a, b) =>
@@ -218,6 +228,7 @@ export async function listObjectsCore(
         prefix,
         delimiter,
         objects: [],
+        folders: [],
         commonPrefixes: [],
         isTruncated: false,
         nextToken: null,
@@ -232,17 +243,17 @@ export async function listObjectsCore(
   }
 
   let contents: ListBucketEntry[] = [];
-  let prefixes: string[] = [];
+  let folders: AdminFolder[] = [];
 
   if (delimiter.length > 0) {
     const r = await listWithDelimiter(ctx, W, folderId, basePrefix);
     contents = r.contents;
-    prefixes = r.prefixes;
+    folders = r.folders;
   } else {
     contents = await listRecursive(ctx, W, folderId, basePrefix);
   }
 
-  const rows = mergeRows(contents, prefixes);
+  const rows = mergeRows(contents, folders);
   let start = 0;
   const decoded = decodeToken(tokenIn);
   const dNorm = delimiter;
@@ -260,12 +271,15 @@ export async function listObjectsCore(
   const nextOffset = start + page.length;
 
   const outContents: ListBucketEntry[] = [];
-  const outPrefixes: { Prefix: string }[] = [];
+  const outFolders: AdminFolder[] = [];
   for (const row of page) {
     if (row.kind === "c") {
       outContents.push(row.content);
     } else {
-      outPrefixes.push({ Prefix: row.prefix });
+      outFolders.push({
+        prefix: row.prefix,
+        lastModified: row.lastModified,
+      });
     }
   }
 
@@ -290,7 +304,8 @@ export async function listObjectsCore(
     prefix,
     delimiter,
     objects,
-    commonPrefixes: outPrefixes.map((p) => p.Prefix),
+    folders: outFolders,
+    commonPrefixes: outFolders.map((f) => f.prefix),
     isTruncated: truncated,
     nextToken: nextTokenEnc ?? null,
     continuationToken: tokenIn ?? null,

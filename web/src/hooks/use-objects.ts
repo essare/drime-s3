@@ -24,10 +24,22 @@ export function flattenListings(pages: Listing[] | undefined): Row[] {
   const files: Row[] = [];
 
   for (const page of pages) {
-    for (const cp of page.commonPrefixes) {
-      const prefix = cp;
-      const name = stripListingPrefix(cp, page.prefix).replace(/\/$/, "");
-      folders.push({ kind: "folder", name, fullPrefix: prefix });
+    const folderEntries =
+      page.folders.length > 0
+        ? page.folders
+        : page.commonPrefixes.map((cp) => ({
+            prefix: cp,
+            lastModified: new Date(0).toISOString(),
+          }));
+    for (const f of folderEntries) {
+      const prefix = f.prefix;
+      const name = stripListingPrefix(prefix, page.prefix).replace(/\/$/, "");
+      folders.push({
+        kind: "folder",
+        name,
+        fullPrefix: prefix,
+        lastModified: f.lastModified,
+      });
     }
     for (const o of page.objects) {
       files.push({

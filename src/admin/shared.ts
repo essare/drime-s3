@@ -70,6 +70,46 @@ async function walkFolderSize(
   return { bytes, objects };
 }
 
+export type FolderStatEntry = {
+  prefix: string;
+  size: number;
+  objectCount: number;
+};
+
+export const FOLDER_STATS_MAX_PREFIXES = 10;
+
+export async function adminFolderStatsBatch(
+  ctx: AppContext,
+  W: number,
+  bucket: string,
+  prefixes: readonly string[],
+): Promise<
+  | { kind: "ok"; stats: FolderStatEntry[] }
+  | { kind: "no-such-bucket" }
+  | { kind: "invalid"; message: string }
+> {
+  if (prefixes.length > FOLDER_STATS_MAX_PREFIXES) {
+    return {
+      kind: "invalid",
+      message: `At most ${FOLDER_STATS_MAX_PREFIXES} folder prefixes per request.`,
+    };
+  }
+  const root = await findRootFolder(ctx, W, bucket);
+  if (root === undefined) return { kind: "no-such-bucket" };
+
+  const stats = await mapWithConcurrency(prefixes, 3, async (rawPrefix) => {
+    const prefix = rawPrefix.endsWith("/") ? rawPrefix : `${rawPrefix}/`;
+    const folderPath = prefix.replace(/\/+$/, "");
+    const folderId = await resolvePrefixUnder(ctx, W, root.id, folderPath);
+    if (folderId === "missing") {
+      return { prefix, size: 0, objectCount: 0 };
+    }
+    const { bytes, objects } = await walkFolderSize(ctx, W, folderId);
+    return { prefix, size: bytes, objectCount: objects };
+  });
+  return { kind: "ok", stats };
+}
+
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,

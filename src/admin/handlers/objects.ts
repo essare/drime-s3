@@ -41,6 +41,7 @@ export async function handleListObjectsAdmin(
     prefix: l.prefix,
     delimiter: l.delimiter,
     objects: l.objects,
+    folders: l.folders,
     commonPrefixes: l.commonPrefixes,
     nextToken: l.nextToken,
   });

@@ -45,6 +45,7 @@ describe("GET /_admin/buckets/:b/objects", () => {
         prefix: string;
         delimiter: string;
         objects: { key: string; size: number; etag: string }[];
+        folders: { prefix: string; lastModified: string }[];
         commonPrefixes: string[];
         nextToken: string | null;
       };
@@ -52,6 +53,9 @@ describe("GET /_admin/buckets/:b/objects", () => {
       expect(j.delimiter).toBe("/");
       expect(j.objects.map((o) => o.key)).toEqual(["a.txt"]);
       expect(j.commonPrefixes).toEqual(["sub/"]);
+      expect(j.folders).toEqual([
+        { prefix: "sub/", lastModified: expect.any(String) },
+      ]);
       expect(j.nextToken).toBeNull();
     } finally {
       setup.cleanup();

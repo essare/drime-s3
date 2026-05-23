@@ -1,5 +1,5 @@
 export type Row =
-  | { kind: "folder"; name: string; fullPrefix: string }
+  | { kind: "folder"; name: string; fullPrefix: string; lastModified: string }
   | {
       kind: "object";
       key: string;

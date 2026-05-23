@@ -7,6 +7,7 @@ import {
   handleListBucketsAdmin,
 } from "./handlers/buckets";
 import { handleCreateFolderAdmin } from "./handlers/folders";
+import { handleFolderStatsAdmin } from "./handlers/folder-stats";
 import { handleHealth } from "./handlers/health";
 import { handleInit } from "./handlers/init";
 import {
@@ -78,6 +79,15 @@ export async function dispatchAdmin(
       ctx,
       decodeURIComponent(folderCreate[1] ?? ""),
       url,
+      req,
+    );
+  }
+
+  const folderStats = /^\/_admin\/buckets\/([^/]+)\/folder-stats$/.exec(path);
+  if (folderStats && method === "POST") {
+    return handleFolderStatsAdmin(
+      ctx,
+      decodeURIComponent(folderStats[1] ?? ""),
       req,
     );
   }

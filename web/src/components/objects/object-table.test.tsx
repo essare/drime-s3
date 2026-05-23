@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+
+import { renderWithProviders } from "@/test/utils";
 
 import { ObjectTable } from "./object-table";
 
@@ -8,8 +10,9 @@ const noopDelete = vi.fn();
 
 describe("ObjectTable", () => {
   it("renders column headers", () => {
-    render(
+    renderWithProviders(
       <ObjectTable
+        bucket="test"
         rows={[]}
         selected={new Set()}
         onSelectChange={() => {}}
@@ -34,8 +37,9 @@ describe("ObjectTable", () => {
   });
 
   it("renders skeleton rows while fetching an empty listing", () => {
-    render(
+    renderWithProviders(
       <ObjectTable
+        bucket="test"
         rows={[]}
         selected={new Set()}
         onSelectChange={() => {}}

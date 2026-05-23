@@ -8,3 +8,5 @@ export const objectsKey = (
   bucket: string,
   params: { prefix: string; delimiter: string },
 ) => ["admin", "objects", bucket, params] as const;
+export const folderStatsKey = (bucket: string, prefixes: string[]) =>
+  ["admin", "folder-stats", bucket, prefixes] as const;

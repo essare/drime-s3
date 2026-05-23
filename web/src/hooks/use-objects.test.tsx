@@ -62,6 +62,12 @@ describe("useObjectsQuery", () => {
             etag: "e3",
           },
         ],
+        folders: [
+          {
+            prefix: "docs/",
+            lastModified: "2026-02-01T12:00:00.000Z",
+          },
+        ],
         commonPrefixes: ["docs/"],
         nextToken: null,
       });
@@ -77,7 +83,11 @@ describe("useObjectsQuery", () => {
 
     const rows = flattenListings(result.current.data?.pages);
     expect(rows).toHaveLength(4);
-    expect(rows[0]).toMatchObject({ kind: "folder", name: "docs" });
+    expect(rows[0]).toMatchObject({
+      kind: "folder",
+      name: "docs",
+      lastModified: "2026-02-01T12:00:00.000Z",
+    });
     expect(rows.slice(1).every((r) => r.kind === "object")).toBe(true);
   });
 

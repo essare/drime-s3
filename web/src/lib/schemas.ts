@@ -69,6 +69,11 @@ export const StatsResponseSchema = z.object({
   ),
 });
 
+const ListingFolderSchema = z.object({
+  prefix: z.string(),
+  lastModified: z.string(),
+});
+
 export const ListingSchema = z.object({
   prefix: z.string(),
   delimiter: z.string(),
@@ -80,8 +85,19 @@ export const ListingSchema = z.object({
       etag: z.string(),
     }),
   ),
+  folders: z.array(ListingFolderSchema).optional().default([]),
   commonPrefixes: z.array(z.string()),
   nextToken: z.string().nullable(),
+});
+
+export const FolderStatsResponseSchema = z.object({
+  stats: z.array(
+    z.object({
+      prefix: z.string(),
+      size: z.number(),
+      objectCount: z.number(),
+    }),
+  ),
 });
 
 export const PutObjectResponseSchema = z.object({

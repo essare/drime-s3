@@ -6,9 +6,11 @@ import {
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
+import { FolderSizeCell } from "@/components/objects/folder-size-cell";
 import type { Row } from "@/components/objects/row-types";
+import { useFolderStatsBatch } from "@/hooks/use-folder-stats";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,6 +38,7 @@ import { formatBytes, formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export type ObjectTableProps = {
+  bucket: string;
   rows: Row[];
   selected: Set<string>;
   onSelectChange: (next: Set<string>) => void;
@@ -59,19 +62,22 @@ function objectBaseName(key: string): string {
   return idx === -1 ? trimmed : trimmed.slice(idx + 1);
 }
 
-function compareObjects(a: Row, b: Row, key: SortKey, dir: SortDir): number {
-  if (a.kind !== "object" || b.kind !== "object") return 0;
+function compareRows(a: Row, b: Row, key: SortKey, dir: SortDir): number {
   const sign = dir === "asc" ? 1 : -1;
   if (key === "name") {
-    return sign * a.key.localeCompare(b.key);
+    const aName = a.kind === "folder" ? a.name : objectBaseName(a.key);
+    const bName = b.kind === "folder" ? b.name : objectBaseName(b.key);
+    return sign * aName.localeCompare(bName);
   }
   if (key === "size") {
+    if (a.kind !== "object" || b.kind !== "object") return 0;
     return sign * (a.size - b.size);
   }
   return sign * a.lastModified.localeCompare(b.lastModified);
 }
 
 export function ObjectTable({
+  bucket,
   rows,
   selected,
   onSelectChange,
@@ -87,6 +93,37 @@ export function ObjectTable({
 }: ObjectTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [visiblePrefixes, setVisiblePrefixes] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [debouncedPrefixes, setDebouncedPrefixes] = useState<string[]>([]);
+
+  const handleVisibilityChange = useCallback(
+    (prefix: string, visible: boolean) => {
+      setVisiblePrefixes((prev) => {
+        const next = new Set(prev);
+        if (visible) next.add(prefix);
+        else next.delete(prefix);
+        return next;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedPrefixes(Array.from(visiblePrefixes).sort());
+    }, 150);
+    return () => window.clearTimeout(handle);
+  }, [visiblePrefixes]);
+
+  const folderStatsQuery = useFolderStatsBatch(
+    bucket,
+    debouncedPrefixes,
+    debouncedPrefixes.length > 0,
+  );
+
+  const folderSizeByPrefix = folderStatsQuery.data;
 
   const displayRows = useMemo(() => {
     const folders = rows.filter((r): r is Extract<Row, { kind: "folder" }> => {
@@ -95,9 +132,9 @@ export function ObjectTable({
     const objects = rows.filter((r): r is Extract<Row, { kind: "object" }> => {
       return r.kind === "object";
     });
-    folders.sort((a, b) => a.name.localeCompare(b.name));
+    folders.sort((a, b) => compareRows(a, b, sortKey, sortDir));
     const sortedObjects = [...objects].sort((a, b) =>
-      compareObjects(a, b, sortKey, sortDir),
+      compareRows(a, b, sortKey, sortDir),
     );
     return [...folders, ...sortedObjects];
   }, [rows, sortDir, sortKey]);
@@ -279,8 +316,15 @@ export function ObjectTable({
                           {row.name}
                         </span>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
+                      <FolderSizeCell
+                        prefix={row.fullPrefix}
+                        size={folderSizeByPrefix?.get(row.fullPrefix)?.size}
+                        loading={folderStatsQuery.isFetching}
+                        onVisibilityChange={handleVisibilityChange}
+                      />
+                      <TableCell className="text-muted-foreground">
+                        {formatRelativeDate(row.lastModified)}
+                      </TableCell>
                       <TableCell
                         className="text-right"
                         onClick={(e) => e.stopPropagation()}

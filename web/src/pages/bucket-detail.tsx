@@ -239,6 +239,7 @@ export default function BucketDetailPage() {
       ) : null}
 
       <ObjectTable
+        bucket={bucket}
         rows={rows}
         selected={selected}
         onSelectChange={onSelectChange}
