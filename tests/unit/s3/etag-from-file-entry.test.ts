@@ -15,6 +15,7 @@ function entry(partial: Partial<FileEntry>): FileEntry {
     hash: null,
     mime: null,
     updated_at: null,
+    created_at: null,
     description: null,
     url: null,
     ...partial,

@@ -88,6 +88,7 @@ const folderEntry = (id: number, name: string): FileEntry => ({
   hash: null,
   mime: null,
   updated_at: null,
+  created_at: null,
   description: null,
   url: null,
 });

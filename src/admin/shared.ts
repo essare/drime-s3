@@ -239,6 +239,7 @@ export function buildSeedFolderEntry(
     hash: null,
     mime: null,
     updated_at: new Date().toISOString(),
+    created_at: null,
     description: null,
     url: null,
   };
