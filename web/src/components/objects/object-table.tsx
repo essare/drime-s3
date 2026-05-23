@@ -6,11 +6,16 @@ import {
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { FolderSizeCell } from "@/components/objects/folder-size-cell";
 import type { Row } from "@/components/objects/row-types";
-import { useFolderStatsBatch } from "@/hooks/use-folder-stats";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -34,6 +39,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useFolderStatsBatch } from "@/hooks/use-folder-stats";
 import { formatBytes, formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 

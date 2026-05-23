@@ -34,10 +34,7 @@ export function FolderSizeCell({
   }, [prefix, onVisibilityChange]);
 
   return (
-    <TableCell
-      ref={ref}
-      className="text-muted-foreground tabular-nums"
-    >
+    <TableCell ref={ref} className="text-muted-foreground tabular-nums">
       {loading && size === undefined ? (
         <Skeleton className="h-4 w-14" />
       ) : size !== undefined ? (

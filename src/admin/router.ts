@@ -6,8 +6,8 @@ import {
   handleDeleteBucketAdmin,
   handleListBucketsAdmin,
 } from "./handlers/buckets";
-import { handleCreateFolderAdmin } from "./handlers/folders";
 import { handleFolderStatsAdmin } from "./handlers/folder-stats";
+import { handleCreateFolderAdmin } from "./handlers/folders";
 import { handleHealth } from "./handlers/health";
 import { handleInit } from "./handlers/init";
 import {

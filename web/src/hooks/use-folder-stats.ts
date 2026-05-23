@@ -19,7 +19,10 @@ async function fetchFolderStatsBatch(
   bucket: string,
   prefixes: string[],
 ): Promise<
-  Map<string, { size: number; objectCount: number; lastModified: string | null }>
+  Map<
+    string,
+    { size: number; objectCount: number; lastModified: string | null }
+  >
 > {
   const map = new Map<
     string,

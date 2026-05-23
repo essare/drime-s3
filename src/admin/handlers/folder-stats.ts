@@ -1,9 +1,6 @@
 import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import {
-  adminFolderStatsBatch,
-  FOLDER_STATS_MAX_PREFIXES,
-} from "../shared";
+import { adminFolderStatsBatch, FOLDER_STATS_MAX_PREFIXES } from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(

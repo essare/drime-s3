@@ -108,11 +108,7 @@ export async function adminFolderStatsBatch(
     if (resolved === "missing") {
       return { prefix, size: 0, objectCount: 0, lastModified: null };
     }
-    const { bytes, objects } = await walkFolderSize(
-      ctx,
-      W,
-      resolved.folderId,
-    );
+    const { bytes, objects } = await walkFolderSize(ctx, W, resolved.folderId);
     return {
       prefix,
       size: bytes,
