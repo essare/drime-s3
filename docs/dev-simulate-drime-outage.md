@@ -25,7 +25,7 @@ The gateway **starts even when Drime is down** (workspace id may be `null` until
 
 3. Open **Dashboard** in the UI.
 
-**Expected:** centered **Drime API unavailable**, error detail (e.g. connection refused), **Retry** button. No stat cards or “Top buckets”.
+**Expected:** stay on **/dashboard** with centered **Drime API unavailable**, error detail (e.g. connection refused), **Retry** button. No redirect to onboarding. No stat cards or “Top buckets”.
 
 4. Restore Drime: remove the line or set `DRIME_API_BASE_URL=https://app.drime.cloud/api/v1`, restart the gateway, click **Retry**.
 

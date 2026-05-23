@@ -18,7 +18,11 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-function statusJson(workspaceExists: boolean) {
+function statusJson(
+  workspaceExists: boolean,
+  opts?: { reachable?: boolean; error?: string },
+) {
+  const reachable = opts?.reachable ?? true;
   return () =>
     Promise.resolve(
       new Response(
@@ -30,7 +34,13 @@ function statusJson(workspaceExists: boolean) {
             region: "drime",
             webUiPasswordSet: true,
           },
-          drime: { reachable: true, latencyMs: 1 },
+          drime: {
+            reachable,
+            latencyMs: reachable ? 1 : 0,
+            ...(reachable
+              ? {}
+              : { error: opts?.error ?? "connection refused" }),
+          },
           workspace: {
             name: "gw",
             id: workspaceExists ? 1 : null,
@@ -73,6 +83,31 @@ describe("OnboardingGate", () => {
       expect(screen.getByTestId("path")).toHaveTextContent("/onboarding");
     });
     expect(screen.queryByTestId("protected")).not.toBeInTheDocument();
+  });
+
+  it("renders dashboard when workspace missing but Drime is unreachable", async () => {
+    mockFetchByUrl({
+      "/_admin/status": statusJson(false, { reachable: false }),
+    });
+    const client = createTestQueryClient();
+
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Routes>
+          <Route element={<OnboardingGate />}>
+            <Route
+              path="/dashboard"
+              element={<div data-testid="protected">ok</div>}
+            />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("protected")).toBeInTheDocument();
+    });
   });
 
   it("renders outlet when workspace exists on /dashboard", async () => {

@@ -17,7 +17,12 @@ export function OnboardingGate() {
   }
 
   const onOnboarding = location.pathname === "/onboarding";
-  if (status.data.workspace.exists === false && !onOnboarding) {
+  // Only send users to onboarding when Drime is reachable but the workspace
+  // still needs setup. If Drime is down, app pages (e.g. dashboard) show their
+  // own outage UI instead of forcing onboarding step 2.
+  const needsOnboarding =
+    status.data.workspace.exists === false && status.data.drime.reachable;
+  if (needsOnboarding && !onOnboarding) {
     return <Navigate to="/onboarding" replace />;
   }
   if (status.data.workspace.exists === true && onOnboarding) {
