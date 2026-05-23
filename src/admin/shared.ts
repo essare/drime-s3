@@ -1,4 +1,5 @@
 import { normalizePathKey } from "../cache/folder-paths";
+import { drimeTimestampToIso } from "../drime/datetime";
 import { type FileEntry, fromFileEntryJson } from "../drime/types";
 import {
   findRootFolder,
@@ -26,7 +27,9 @@ export async function adminListBuckets(
     .filter((e) => e.is_folder && isValidBucketName(e.name))
     .map((e) => ({
       name: e.name,
-      createdAt: e.updated_at ?? new Date(0).toISOString(),
+      createdAt:
+        drimeTimestampToIso(e.updated_at, e.created_at) ??
+        new Date(0).toISOString(),
     }));
 }
 
@@ -74,6 +77,7 @@ export type FolderStatEntry = {
   prefix: string;
   size: number;
   objectCount: number;
+  lastModified: string | null;
 };
 
 export const FOLDER_STATS_MAX_PREFIXES = 10;
@@ -100,12 +104,24 @@ export async function adminFolderStatsBatch(
   const stats = await mapWithConcurrency(prefixes, 3, async (rawPrefix) => {
     const prefix = rawPrefix.endsWith("/") ? rawPrefix : `${rawPrefix}/`;
     const folderPath = prefix.replace(/\/+$/, "");
-    const folderId = await resolvePrefixUnder(ctx, W, root.id, folderPath);
-    if (folderId === "missing") {
-      return { prefix, size: 0, objectCount: 0 };
+    const resolved = await resolvePrefixUnder(ctx, W, root.id, folderPath);
+    if (resolved === "missing") {
+      return { prefix, size: 0, objectCount: 0, lastModified: null };
     }
-    const { bytes, objects } = await walkFolderSize(ctx, W, folderId);
-    return { prefix, size: bytes, objectCount: objects };
+    const { bytes, objects } = await walkFolderSize(
+      ctx,
+      W,
+      resolved.folderId,
+    );
+    return {
+      prefix,
+      size: bytes,
+      objectCount: objects,
+      lastModified: drimeTimestampToIso(
+        resolved.entry.updated_at,
+        resolved.entry.created_at,
+      ),
+    };
   });
   return { kind: "ok", stats };
 }
@@ -485,11 +501,21 @@ async function resolvePrefixUnder(
   W: number,
   bucketRootId: number,
   prefix: string,
-): Promise<number | "missing"> {
+): Promise<{ folderId: number; entry: FileEntry } | "missing"> {
   const trimmed = prefix.replace(/^\/+|\/+$/g, "");
-  if (trimmed.length === 0) return bucketRootId;
+  if (trimmed.length === 0) {
+    const entries = await ctx.listCache.getOrFetch(bucketRootId, () =>
+      ctx.drime.listFolder(bucketRootId, W),
+    );
+    const root =
+      entries.find((e) => e.id === bucketRootId) ??
+      entries.find((e) => e.is_folder);
+    if (!root) return "missing";
+    return { folderId: bucketRootId, entry: root };
+  }
   const parts = trimmed.split("/").filter(Boolean);
   let currentId = bucketRootId;
+  let currentEntry: FileEntry | null = null;
   for (const part of parts) {
     const entries = await ctx.listCache.getOrFetch(currentId, () =>
       ctx.drime.listFolder(currentId, W),
@@ -498,9 +524,11 @@ async function resolvePrefixUnder(
       (e) => e.is_folder && e.name.toLowerCase() === part.toLowerCase(),
     );
     if (!found) return "missing";
+    currentEntry = found;
     currentId = found.id;
   }
-  return currentId;
+  if (!currentEntry) return "missing";
+  return { folderId: currentId, entry: currentEntry };
 }
 
 export async function adminCreateFolder(
@@ -519,7 +547,7 @@ export async function adminCreateFolder(
 
   const parentResolved = await resolvePrefixUnder(ctx, W, root.id, prefix);
   if (parentResolved === "missing") return { kind: "no-such-prefix" };
-  const parentId = parentResolved;
+  const parentId = parentResolved.folderId;
 
   const siblings = await ctx.listCache.getOrFetch(parentId, () =>
     ctx.drime.listFolder(parentId, W),

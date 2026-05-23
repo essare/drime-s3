@@ -44,11 +44,19 @@ describe("POST /_admin/buckets/:b/folder-stats", () => {
       );
       expect(res.status).toBe(200);
       const j = (await res.json()) as {
-        stats: { prefix: string; size: number; objectCount: number }[];
+        stats: {
+          prefix: string;
+          size: number;
+          objectCount: number;
+          lastModified: string | null;
+        }[];
       };
-      expect(j.stats).toEqual([
-        { prefix: "sub/", size: 5, objectCount: 2 },
-      ]);
+      expect(j.stats).toHaveLength(1);
+      expect(j.stats[0]?.prefix).toBe("sub/");
+      expect(j.stats[0]?.size).toBe(5);
+      expect(j.stats[0]?.objectCount).toBe(2);
+      expect(typeof j.stats[0]?.lastModified).toBe("string");
+      expect(j.stats[0]?.lastModified).not.toBe("1970-01-01T00:00:00.000Z");
     } finally {
       setup.cleanup();
     }

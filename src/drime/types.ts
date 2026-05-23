@@ -9,6 +9,7 @@ export interface FileEntry {
   hash: string | null;
   mime: string | null;
   updated_at: string | null;
+  created_at: string | null;
   description: string | null;
   url: string | null;
 }
@@ -43,6 +44,7 @@ export function fromFileEntryJson(item: unknown): FileEntry {
       hash: null,
       mime: null,
       updated_at: null,
+      created_at: null,
       description: null,
       url: null,
     };
@@ -59,7 +61,8 @@ export function fromFileEntryJson(item: unknown): FileEntry {
     file_size: finiteNumber(o.file_size, 0),
     hash: optionalString(o.hash),
     mime: optionalString(o.mime),
-    updated_at: optionalString(o.updated_at),
+    updated_at: optionalString(o.updated_at) ?? optionalString(o.updatedAt),
+    created_at: optionalString(o.created_at) ?? optionalString(o.createdAt),
     description: optionalString(o.description),
     url: optionalString(o.url),
   };

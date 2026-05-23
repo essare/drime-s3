@@ -96,6 +96,7 @@ export const FolderStatsResponseSchema = z.object({
       prefix: z.string(),
       size: z.number(),
       objectCount: z.number(),
+      lastModified: z.string().nullable().optional(),
     }),
   ),
 });

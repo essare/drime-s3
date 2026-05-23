@@ -29,7 +29,7 @@ export function flattenListings(pages: Listing[] | undefined): Row[] {
         ? page.folders
         : page.commonPrefixes.map((cp) => ({
             prefix: cp,
-            lastModified: new Date(0).toISOString(),
+            lastModified: "",
           }));
     for (const f of folderEntries) {
       const prefix = f.prefix;

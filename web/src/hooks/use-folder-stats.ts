@@ -18,8 +18,13 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 async function fetchFolderStatsBatch(
   bucket: string,
   prefixes: string[],
-): Promise<Map<string, { size: number; objectCount: number }>> {
-  const map = new Map<string, { size: number; objectCount: number }>();
+): Promise<
+  Map<string, { size: number; objectCount: number; lastModified: string | null }>
+> {
+  const map = new Map<
+    string,
+    { size: number; objectCount: number; lastModified: string | null }
+  >();
   if (prefixes.length === 0) return map;
 
   const chunks = chunk(prefixes, MAX_PREFIXES_PER_REQUEST);
@@ -33,7 +38,11 @@ async function fetchFolderStatsBatch(
       },
     );
     for (const s of data.stats) {
-      map.set(s.prefix, { size: s.size, objectCount: s.objectCount });
+      map.set(s.prefix, {
+        size: s.size,
+        objectCount: s.objectCount,
+        lastModified: s.lastModified ?? null,
+      });
     }
   }
   return map;

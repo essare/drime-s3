@@ -323,7 +323,10 @@ export function ObjectTable({
                         onVisibilityChange={handleVisibilityChange}
                       />
                       <TableCell className="text-muted-foreground">
-                        {formatRelativeDate(row.lastModified)}
+                        {formatRelativeDate(
+                          folderSizeByPrefix?.get(row.fullPrefix)
+                            ?.lastModified ?? row.lastModified,
+                        )}
                       </TableCell>
                       <TableCell
                         className="text-right"

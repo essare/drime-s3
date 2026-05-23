@@ -10,12 +10,14 @@ export function formatBytes(bytes: number): string {
   return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }
 
+const EPOCH_MS = Date.parse("1970-01-01T00:00:00.000Z");
+
 export function formatRelativeDate(
   iso: string,
   now: Date = new Date(),
 ): string {
   const ts = Date.parse(iso);
-  if (Number.isNaN(ts)) return iso;
+  if (Number.isNaN(ts) || ts <= EPOCH_MS) return "—";
   const diffMs = now.getTime() - ts;
   const min = Math.round(diffMs / 60_000);
   if (min < 1) return "just now";

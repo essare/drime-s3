@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { drimeTimestampToIso } from "../../drime/datetime";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { etagFromFileEntry } from "../tagging";
@@ -69,18 +70,17 @@ function decodeToken(raw: string | null): ListCursor | null {
   return null;
 }
 
-function formatIso(updatedAt: string | null): string {
-  if (!updatedAt) return new Date(0).toISOString();
-  const t = Date.parse(updatedAt);
-  return Number.isFinite(t)
-    ? new Date(t).toISOString()
-    : new Date(0).toISOString();
+function formatIso(entry: FileEntry): string {
+  return (
+    drimeTimestampToIso(entry.updated_at, entry.created_at) ??
+    new Date(0).toISOString()
+  );
 }
 
 function toContent(entry: FileEntry, key: string): ListBucketEntry {
   return {
     Key: key,
-    LastModified: formatIso(entry.updated_at),
+    LastModified: formatIso(entry),
     ETag: etagFromFileEntry(entry),
     Size: entry.file_size,
     StorageClass: "STANDARD",
@@ -155,7 +155,7 @@ async function listWithDelimiter(
     if (entry.is_folder) {
       folders.push({
         prefix: `${fullKey}/`,
-        lastModified: formatIso(entry.updated_at),
+        lastModified: formatIso(entry),
       });
     } else {
       contents.push(toContent(entry, fullKey));

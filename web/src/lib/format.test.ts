@@ -40,7 +40,10 @@ describe("formatRelativeDate", () => {
     expect(formatRelativeDate("2026-05-06T12:00:00.000Z", now)).toBe("3d ago");
   });
 
-  it("returns the raw string when ISO is invalid", () => {
-    expect(formatRelativeDate("not-a-date", new Date())).toBe("not-a-date");
+  it("returns em dash for invalid or epoch timestamps", () => {
+    expect(
+      formatRelativeDate("1970-01-01T00:00:00.000Z", new Date("2026-05-22")),
+    ).toBe("—");
+    expect(formatRelativeDate("not-a-date", new Date())).toBe("—");
   });
 });
