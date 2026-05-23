@@ -14,6 +14,7 @@
   <a href="https://hub.docker.com/r/essayoub/drime-s3"><img src="https://img.shields.io/docker/v/essayoub/drime-s3/latest?label=Docker%20Hub&logo=docker" alt="Docker Hub version" /></a>
   <a href="https://github.com/essare/drime-s3/pkgs/container/drime-s3"><img src="https://img.shields.io/badge/ghcr.io-package-blue?logo=github" alt="GitHub Container Registry" /></a>
   <a href="https://github.com/essare/drime-s3/blob/main/package.json"><img src="https://img.shields.io/badge/Bun-1.3-000?logo=bun&logoColor=white" alt="Bun 1.3" /></a>
+  <a href="https://github.com/essare/drime-s3/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
 </p>
 
 ---
@@ -119,6 +120,8 @@ Optional **`~/.config/drime-s3/config.toml`**. Full env list: **`src/config.ts`*
 
 ---
 
-## Contributing & legal
+## Contributing & license
 
-See **[CONTRIBUTING.md](./CONTRIBUTING.md)** and **[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)**. Add a **`LICENSE`** in the repo root when you pick a license.
+See **[CONTRIBUTING.md](./CONTRIBUTING.md)** and **[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)**.
+
+This project is released under the **[MIT License](./LICENSE)**.
