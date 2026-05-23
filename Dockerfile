@@ -1,13 +1,20 @@
 FROM oven/bun:1.3.13-alpine AS web-build
+ARG APP_VERSION=dev
+ARG COMMIT_SHA=unknown
 WORKDIR /app/web
 
+COPY package.json /app/package.json
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY web/ ./
+ENV VITE_APP_VERSION=${APP_VERSION}
+ENV VITE_COMMIT_SHA=${COMMIT_SHA}
 RUN bun run build
 
 FROM oven/bun:1.3.13-alpine AS server-build
+ARG APP_VERSION=dev
+ARG COMMIT_SHA=unknown
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -21,6 +28,7 @@ COPY drime-swagger.yaml ./
 # build-release.ts rebuilds the UI before copying it next to the binary, so
 # reuse the prepared web workspace from the previous stage.
 COPY --from=web-build /app/web ./web
+ENV COMMIT_SHA=${COMMIT_SHA}
 RUN bun run scripts/build-release.ts
 
 FROM alpine:3.20 AS runtime

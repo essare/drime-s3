@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 
 import { Logo } from "@/components/branding/logo";
 import { NAV_ITEMS } from "@/components/layout/nav-items";
+import { formatBuildLabel } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -30,6 +31,11 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <footer className="shrink-0 border-t px-4 py-3">
+        <p className="font-mono text-xs text-muted-foreground">
+          {formatBuildLabel()}
+        </p>
+      </footer>
     </aside>
   );
 }

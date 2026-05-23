@@ -79,6 +79,12 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern=v{{version}}
 
+      - name: Package version
+        id: pkg
+        run: |
+          echo "version=$(bun -e 'console.log(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -87,6 +93,9 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.pkg.outputs.version }}
+            COMMIT_SHA=${{ steps.pkg.outputs.commit_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
