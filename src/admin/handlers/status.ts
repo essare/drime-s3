@@ -1,3 +1,4 @@
+import { formatDrimeStatusError } from "../../drime/format-status-error";
 import { findWorkspaceIdByName } from "../../drime/workspace";
 import type { AppContext } from "../../server-context";
 import { jsonOk } from "../errors";
@@ -28,7 +29,8 @@ export async function handleStatus(ctx: AppContext): Promise<Response> {
     workspaceId = typeof found === "number" ? found : null;
   } catch (e) {
     latencyMs = Math.round(performance.now() - t0);
-    error = e instanceof Error ? e.message : String(e);
+    const raw = e instanceof Error ? e.message : String(e);
+    error = formatDrimeStatusError(raw);
   }
 
   return jsonOk({
