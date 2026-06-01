@@ -58,7 +58,7 @@ export async function dispatchAdmin(
 
   if (method === "GET" && path === "/_admin/status") return handleStatus(ctx);
   if (method === "GET" && path === "/_admin/stats")
-    return handleStatsAdmin(ctx);
+    return handleStatsAdmin(ctx, url);
   if (method === "POST" && path === "/_admin/init") return handleInit(ctx);
 
   if (path === "/_admin/buckets" && method === "GET")

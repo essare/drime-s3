@@ -10,8 +10,12 @@ function workspaceUnavailable(): Response {
   );
 }
 
-export async function handleStatsAdmin(ctx: AppContext): Promise<Response> {
+export async function handleStatsAdmin(
+  ctx: AppContext,
+  url: URL,
+): Promise<Response> {
   if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
-  const stats = await adminGetStats(ctx, ctx.gatewayWorkspaceId);
+  const accurate = url.searchParams.get("accurate") === "true";
+  const stats = await adminGetStats(ctx, ctx.gatewayWorkspaceId, { accurate });
   return jsonOk(stats);
 }

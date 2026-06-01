@@ -32,6 +32,22 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function rollupFolderBytes(
+  entries: Entry[],
+  startParentId: number | null,
+  delta: number,
+): void {
+  let parentId = startParentId;
+  while (parentId !== null) {
+    const folder = entries.find(
+      (e) => e.id === parentId && e.type === "folder",
+    );
+    if (!folder) break;
+    folder.file_size = Math.max(0, folder.file_size + delta);
+    parentId = folder.parent_id;
+  }
+}
+
 function entryToJson(e: Entry, origin: string): Record<string, unknown> {
   const base: Record<string, unknown> = {
     id: e.id,
@@ -290,6 +306,7 @@ export async function startMockDrime(
           };
           entries.push(row);
           fileBytes.set(id, payload);
+          rollupFolderBytes(entries, parentId, payload.length);
           return json({ fileEntry: entryToJson(row, url.origin) });
         })();
       }
@@ -327,6 +344,9 @@ export async function startMockDrime(
           for (let i = entries.length - 1; i >= 0; i--) {
             const row = entries[i];
             if (row !== undefined && ids.has(row.id)) {
+              if (row.type === "text") {
+                rollupFolderBytes(entries, row.parent_id, -row.file_size);
+              }
               fileBytes.delete(row.id);
               entries.splice(i, 1);
             }

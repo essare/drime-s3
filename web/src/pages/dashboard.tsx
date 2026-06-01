@@ -236,7 +236,16 @@ export default function DashboardPage() {
           <StatCard
             icon={<Database className="size-4" aria-hidden />}
             label="Total objects"
-            value={(stats?.totalObjects ?? 0).toLocaleString()}
+            value={
+              stats?.totalObjects != null
+                ? stats.totalObjects.toLocaleString()
+                : "—"
+            }
+            hint={
+              stats?.totalObjects == null && stats
+                ? "Use accurate stats API for object counts"
+                : undefined
+            }
             loading={isLoading}
           />
           <StatCard
@@ -293,10 +302,12 @@ export default function DashboardPage() {
                       {b.name}
                     </Link>
                     <div className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>
-                        {b.objects.toLocaleString()} object
-                        {b.objects === 1 ? "" : "s"}
-                      </span>
+                      {b.objects != null ? (
+                        <span>
+                          {b.objects.toLocaleString()} object
+                          {b.objects === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
                       <span className="font-mono">{formatBytes(b.bytes)}</span>
                     </div>
                   </li>

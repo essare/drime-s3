@@ -21,12 +21,12 @@ async function fetchFolderStatsBatch(
 ): Promise<
   Map<
     string,
-    { size: number; objectCount: number; lastModified: string | null }
+    { size: number; objectCount: number | null; lastModified: string | null }
   >
 > {
   const map = new Map<
     string,
-    { size: number; objectCount: number; lastModified: string | null }
+    { size: number; objectCount: number | null; lastModified: string | null }
   >();
   if (prefixes.length === 0) return map;
 
@@ -43,7 +43,7 @@ async function fetchFolderStatsBatch(
     for (const s of data.stats) {
       map.set(s.prefix, {
         size: s.size,
-        objectCount: s.objectCount,
+        objectCount: s.objectCount ?? null,
         lastModified: s.lastModified ?? null,
       });
     }

@@ -50,6 +50,7 @@ describe("DashboardPage", () => {
           buckets: 3,
           totalBytes: 1024 * 1024 * 250 + 500,
           totalObjects: 142,
+          source: "walk",
           perBucket: [
             { name: "alpha", bytes: 1024 * 1024 * 200, objects: 100 },
             { name: "beta", bytes: 1024 * 1024 * 50, objects: 40 },
@@ -104,7 +105,8 @@ describe("DashboardPage", () => {
         jsonResponse({
           buckets: 0,
           totalBytes: 0,
-          totalObjects: 0,
+          totalObjects: null,
+          source: "metadata",
           perBucket: [],
         }),
     });
@@ -163,7 +165,8 @@ describe("DashboardPage", () => {
         jsonResponse({
           buckets: 0,
           totalBytes: 0,
-          totalObjects: 0,
+          totalObjects: null,
+          source: "metadata",
           perBucket: [],
         }),
     });
@@ -274,6 +277,7 @@ describe("DashboardPage", () => {
           buckets: 1,
           totalBytes: 100,
           totalObjects: 1,
+          source: "walk",
           perBucket: [{ name: "a", bytes: 100, objects: 1 }],
         }),
     });
@@ -314,6 +318,7 @@ describe("DashboardPage", () => {
           buckets: 1,
           totalBytes: 100,
           totalObjects: 1,
+          source: "walk",
           perBucket: [{ name: "a", bytes: 100, objects: 1 }],
         });
       },
@@ -369,7 +374,8 @@ describe("DashboardPage", () => {
         jsonResponse({
           buckets: 0,
           totalBytes: 0,
-          totalObjects: 0,
+          totalObjects: null,
+          source: "metadata",
           perBucket: [],
         }),
     });

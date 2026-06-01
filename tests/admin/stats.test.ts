@@ -14,8 +14,9 @@ function authedHeaders(cookie: string): HeadersInit {
 type StatsResponse = {
   buckets: number;
   totalBytes: number;
-  totalObjects: number;
-  perBucket: { name: string; bytes: number; objects: number }[];
+  totalObjects: number | null;
+  source: "metadata" | "walk";
+  perBucket: { name: string; bytes: number; objects: number | null }[];
 };
 
 async function uploadObject(
@@ -60,7 +61,8 @@ describe("/_admin/stats", () => {
       expect(j).toEqual({
         buckets: 0,
         totalBytes: 0,
-        totalObjects: 0,
+        totalObjects: null,
+        source: "metadata",
         perBucket: [],
       });
     } finally {
@@ -81,12 +83,13 @@ describe("/_admin/stats", () => {
       await uploadObject(setup, cookie, "beta", "only.txt", "x");
 
       const res = await setup.call(
-        new Request(`${ORIG}/_admin/stats`, {
+        new Request(`${ORIG}/_admin/stats?accurate=true`, {
           headers: authedHeaders(cookie),
         }),
       );
       expect(res.status).toBe(200);
       const j = (await res.json()) as StatsResponse;
+      expect(j.source).toBe("walk");
       expect(j.buckets).toBe(3);
       expect(j.totalObjects).toBe(3);
       expect(j.totalBytes).toBe(5 + 10 + 1);
@@ -113,6 +116,32 @@ describe("/_admin/stats", () => {
         "beta",
         "gamma",
       ]);
+    } finally {
+      setup.cleanup();
+    }
+  });
+
+  test("fast metadata stats use Drime folder file_size without walking", async () => {
+    const setup = await startAdmin({
+      password: "hunter2-hunter2",
+      seedRootFolders: ["alpha", "beta"],
+    });
+    try {
+      const cookie = await loginCookie(setup, "hunter2-hunter2");
+      await uploadObject(setup, cookie, "alpha", "a.txt", "12345");
+      await uploadObject(setup, cookie, "beta", "only.txt", "x");
+
+      const res = await setup.call(
+        new Request(`${ORIG}/_admin/stats`, {
+          headers: authedHeaders(cookie),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const j = (await res.json()) as StatsResponse;
+      expect(j.source).toBe("metadata");
+      expect(j.totalBytes).toBe(6);
+      expect(j.totalObjects).toBeNull();
+      expect(j.perBucket.find((b) => b.name === "alpha")?.bytes).toBe(5);
     } finally {
       setup.cleanup();
     }

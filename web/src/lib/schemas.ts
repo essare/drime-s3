@@ -59,12 +59,13 @@ export type CreateFolderResponse = z.infer<typeof CreateFolderResponseSchema>;
 export const StatsResponseSchema = z.object({
   buckets: z.number(),
   totalBytes: z.number(),
-  totalObjects: z.number(),
+  totalObjects: z.number().nullable(),
+  source: z.enum(["metadata", "walk"]),
   perBucket: z.array(
     z.object({
       name: z.string(),
       bytes: z.number(),
-      objects: z.number(),
+      objects: z.number().nullable(),
     }),
   ),
 });
@@ -95,7 +96,7 @@ export const FolderStatsResponseSchema = z.object({
     z.object({
       prefix: z.string(),
       size: z.number(),
-      objectCount: z.number(),
+      objectCount: z.number().nullable().optional(),
       lastModified: z.string().nullable().optional(),
     }),
   ),
