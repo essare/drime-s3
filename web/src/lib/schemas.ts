@@ -60,12 +60,22 @@ export const StatsResponseSchema = z.object({
   buckets: z.number(),
   totalBytes: z.number(),
   totalObjects: z.number().nullable(),
-  source: z.enum(["metadata", "walk"]),
+  source: z.literal("metadata"),
   perBucket: z.array(
     z.object({
       name: z.string(),
       bytes: z.number(),
       objects: z.number().nullable(),
+    }),
+  ),
+});
+
+export const StatsObjectCountsResponseSchema = z.object({
+  totalObjects: z.number(),
+  perBucket: z.array(
+    z.object({
+      name: z.string(),
+      objects: z.number(),
     }),
   ),
 });

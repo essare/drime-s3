@@ -7,7 +7,7 @@ import {
   Plus,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { CreateBucketDialog } from "@/components/buckets/create-bucket-dialog";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useStatsQuery } from "@/hooks/use-stats";
+import { useStatsObjectCountsQuery } from "@/hooks/use-stats-object-counts";
 import { useStatusQuery } from "@/hooks/use-status";
 import { formatBytes } from "@/lib/format";
 import { latencyColorClass } from "@/lib/latency-color";
@@ -151,6 +152,7 @@ export default function DashboardPage() {
   const [retryInFlight, setRetryInFlight] = useState(false);
   const statsQuery = useStatsQuery();
   const statusQuery = useStatusQuery();
+  const objectCountsQuery = useStatsObjectCountsQuery(statsQuery.isSuccess);
 
   const blocked =
     statsQuery.isError ||
@@ -162,14 +164,42 @@ export default function DashboardPage() {
     statsQuery.isFetching ||
     statusQuery.isFetching ||
     statsQuery.isRefetching ||
-    statusQuery.isRefetching;
+    statusQuery.isRefetching ||
+    objectCountsQuery.isFetching;
 
   const handleRetry = () => {
     setRetryInFlight(true);
-    void Promise.all([statsQuery.refetch(), statusQuery.refetch()]).finally(
-      () => setRetryInFlight(false),
-    );
+    void Promise.all([
+      statsQuery.refetch(),
+      statusQuery.refetch(),
+      objectCountsQuery.refetch(),
+    ]).finally(() => setRetryInFlight(false));
   };
+
+  const stats = statsQuery.data;
+  const status = statusQuery.data;
+  const isLoading = statsQuery.isLoading;
+
+  const objectsByBucket = useMemo(
+    () =>
+      new Map(
+        (objectCountsQuery.data?.perBucket ?? []).map((b) => [
+          b.name,
+          b.objects,
+        ]),
+      ),
+    [objectCountsQuery.data],
+  );
+
+  const topBuckets = (stats?.perBucket ?? [])
+    .slice()
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 5);
+
+  const objectCountsLoading =
+    statsQuery.isSuccess &&
+    (objectCountsQuery.isLoading ||
+      (objectCountsQuery.isFetching && objectCountsQuery.data === undefined));
 
   if (blocked) {
     return (
@@ -180,15 +210,6 @@ export default function DashboardPage() {
       />
     );
   }
-
-  const stats = statsQuery.data;
-  const status = statusQuery.data;
-  const isLoading = statsQuery.isLoading;
-
-  const topBuckets = (stats?.perBucket ?? [])
-    .slice()
-    .sort((a, b) => b.bytes - a.bytes)
-    .slice(0, 5);
 
   return (
     <div className="space-y-8">
@@ -237,16 +258,16 @@ export default function DashboardPage() {
             icon={<Database className="size-4" aria-hidden />}
             label="Total objects"
             value={
-              stats?.totalObjects != null
-                ? stats.totalObjects.toLocaleString()
-                : "—"
+              objectCountsQuery.isError
+                ? "—"
+                : (objectCountsQuery.data?.totalObjects.toLocaleString() ?? "—")
             }
             hint={
-              stats?.totalObjects == null && stats
-                ? "Use accurate stats API for object counts"
+              objectCountsQuery.isError
+                ? "Could not load object count"
                 : undefined
             }
-            loading={isLoading}
+            loading={isLoading || objectCountsLoading}
           />
           <StatCard
             icon={<Activity className="size-4" aria-hidden />}
@@ -302,10 +323,12 @@ export default function DashboardPage() {
                       {b.name}
                     </Link>
                     <div className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-                      {b.objects != null ? (
+                      {objectCountsLoading ? (
+                        <Skeleton className="h-3 w-14" />
+                      ) : objectsByBucket.has(b.name) ? (
                         <span>
-                          {b.objects.toLocaleString()} object
-                          {b.objects === 1 ? "" : "s"}
+                          {objectsByBucket.get(b.name)?.toLocaleString()} object
+                          {(objectsByBucket.get(b.name) ?? 0) === 1 ? "" : "s"}
                         </span>
                       ) : null}
                       <span className="font-mono">{formatBytes(b.bytes)}</span>

@@ -7,7 +7,7 @@ import {
 } from "./admin/state";
 import { FolderPathCache } from "./cache/folder-paths";
 import { ListTtlCache } from "./cache/list-ttl";
-import { StatsCache } from "./cache/stats-cache";
+import { ObjectCountsCache, StatsCache } from "./cache/stats-cache";
 import type { AppConfig } from "./config";
 import { DrimeClient, type DrimeFetchFn } from "./drime/client";
 import { MultipartSessionStore } from "./multipart/session-store";
@@ -23,6 +23,7 @@ export type AppContext = {
   folderCache: FolderPathCache;
   listCache: ListTtlCache;
   statsCache: StatsCache;
+  objectCountsCache: ObjectCountsCache;
   multipartStore: MultipartSessionStore;
   webUi: WebUiState;
   logger: Logger;
@@ -88,6 +89,7 @@ export async function createAppContext(
     folderCache: new FolderPathCache(),
     listCache: new ListTtlCache(),
     statsCache: new StatsCache(),
+    objectCountsCache: new ObjectCountsCache(),
     multipartStore: new MultipartSessionStore(),
     webUi,
     logger,

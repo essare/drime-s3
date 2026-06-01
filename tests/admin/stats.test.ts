@@ -15,7 +15,7 @@ type StatsResponse = {
   buckets: number;
   totalBytes: number;
   totalObjects: number | null;
-  source: "metadata" | "walk";
+  source: "metadata";
   perBucket: { name: string; bytes: number; objects: number | null }[];
 };
 
@@ -70,7 +70,7 @@ describe("/_admin/stats", () => {
     }
   });
 
-  test("multiple buckets with seeded objects sum correctly", async () => {
+  test("multiple buckets return metadata bytes without object counts", async () => {
     const setup = await startAdmin({
       password: "hunter2-hunter2",
       seedRootFolders: ["alpha", "beta", "gamma"],
@@ -83,34 +83,33 @@ describe("/_admin/stats", () => {
       await uploadObject(setup, cookie, "beta", "only.txt", "x");
 
       const res = await setup.call(
-        new Request(`${ORIG}/_admin/stats?accurate=true`, {
+        new Request(`${ORIG}/_admin/stats`, {
           headers: authedHeaders(cookie),
         }),
       );
       expect(res.status).toBe(200);
       const j = (await res.json()) as StatsResponse;
-      expect(j.source).toBe("walk");
+      expect(j.source).toBe("metadata");
       expect(j.buckets).toBe(3);
-      expect(j.totalObjects).toBe(3);
+      expect(j.totalObjects).toBeNull();
       expect(j.totalBytes).toBe(5 + 10 + 1);
 
       const byName = new Map(j.perBucket.map((b) => [b.name, b]));
       expect(byName.get("alpha")).toEqual({
         name: "alpha",
         bytes: 15,
-        objects: 2,
+        objects: null,
       });
       expect(byName.get("beta")).toEqual({
         name: "beta",
         bytes: 1,
-        objects: 1,
+        objects: null,
       });
       expect(byName.get("gamma")).toEqual({
         name: "gamma",
         bytes: 0,
-        objects: 0,
+        objects: null,
       });
-      // perBucket is sorted alphabetically.
       expect(j.perBucket.map((b) => b.name)).toEqual([
         "alpha",
         "beta",

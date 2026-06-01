@@ -9,6 +9,16 @@ export type WorkspaceStats = {
   totalBytes: number;
   totalObjects: number | null;
   perBucket: BucketStat[];
-  /** `metadata` uses Drime folder `file_size` (one list call). `walk` recurses all objects. */
-  source: "metadata" | "walk";
+  /** Fast path always uses Drime folder `file_size` from the root listing. */
+  source: "metadata";
+};
+
+export type BucketObjectCount = {
+  name: string;
+  objects: number;
+};
+
+export type WorkspaceObjectCounts = {
+  totalObjects: number;
+  perBucket: BucketObjectCount[];
 };

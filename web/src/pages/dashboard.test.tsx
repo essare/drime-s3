@@ -27,6 +27,32 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
+function defaultObjectCounts(
+  totalObjects = 142,
+  perBucket: { name: string; objects: number }[] = [
+    { name: "alpha", objects: 100 },
+    { name: "beta", objects: 40 },
+    { name: "gamma", objects: 2 },
+  ],
+) {
+  return jsonResponse({ totalObjects, perBucket });
+}
+
+function defaultStats(overrides: Record<string, unknown> = {}) {
+  return jsonResponse({
+    buckets: 3,
+    totalBytes: 1024 * 1024 * 250 + 500,
+    totalObjects: null,
+    source: "metadata",
+    perBucket: [
+      { name: "alpha", bytes: 1024 * 1024 * 200, objects: null },
+      { name: "beta", bytes: 1024 * 1024 * 50, objects: null },
+      { name: "gamma", bytes: 500, objects: null },
+    ],
+    ...overrides,
+  });
+}
+
 function defaultStatus() {
   return jsonResponse({
     env: {
@@ -45,18 +71,8 @@ describe("DashboardPage", () => {
   it("renders bucket count, size, object count, workspace status, and top buckets", async () => {
     mockFetchByUrl({
       "/_admin/status": () => defaultStatus(),
-      "/_admin/stats": () =>
-        jsonResponse({
-          buckets: 3,
-          totalBytes: 1024 * 1024 * 250 + 500,
-          totalObjects: 142,
-          source: "walk",
-          perBucket: [
-            { name: "alpha", bytes: 1024 * 1024 * 200, objects: 100 },
-            { name: "beta", bytes: 1024 * 1024 * 50, objects: 40 },
-            { name: "gamma", bytes: 500, objects: 2 },
-          ],
-        }),
+      "/_admin/stats": () => defaultStats(),
+      "/_admin/stats/object-counts": () => defaultObjectCounts(),
     });
 
     const client = createTestQueryClient();
@@ -79,7 +95,9 @@ describe("DashboardPage", () => {
     expect(buckets).toHaveTextContent("Workspace size");
     expect(buckets).toHaveTextContent("250 MB");
     expect(buckets).toHaveTextContent("Total objects");
-    expect(buckets).toHaveTextContent("142");
+    await waitFor(() => {
+      expect(buckets).toHaveTextContent("142");
+    });
     expect(buckets).toHaveTextContent("drime_admin");
     expect(buckets).toHaveTextContent("Drime reachable in");
     expect(screen.getByText("87 ms")).toHaveClass("text-emerald-500");
@@ -109,6 +127,8 @@ describe("DashboardPage", () => {
           source: "metadata",
           perBucket: [],
         }),
+      "/_admin/stats/object-counts": () =>
+        jsonResponse({ totalObjects: 0, perBucket: [] }),
     });
 
     const client = createTestQueryClient();
@@ -273,12 +293,10 @@ describe("DashboardPage", () => {
           workspace: { name: "drime_admin", id: null, exists: false },
         }),
       "/_admin/stats": () =>
-        jsonResponse({
+        defaultStats({
           buckets: 1,
           totalBytes: 100,
-          totalObjects: 1,
-          source: "walk",
-          perBucket: [{ name: "a", bytes: 100, objects: 1 }],
+          perBucket: [{ name: "a", bytes: 100, objects: null }],
         }),
     });
 
@@ -314,14 +332,17 @@ describe("DashboardPage", () => {
             500,
           );
         }
-        return jsonResponse({
+        return defaultStats({
           buckets: 1,
           totalBytes: 100,
-          totalObjects: 1,
-          source: "walk",
-          perBucket: [{ name: "a", bytes: 100, objects: 1 }],
+          perBucket: [{ name: "a", bytes: 100, objects: null }],
         });
       },
+      "/_admin/stats/object-counts": () =>
+        jsonResponse({
+          totalObjects: 1,
+          perBucket: [{ name: "a", objects: 1 }],
+        }),
     });
 
     const client = createTestQueryClient();
@@ -378,6 +399,8 @@ describe("DashboardPage", () => {
           source: "metadata",
           perBucket: [],
         }),
+      "/_admin/stats/object-counts": () =>
+        jsonResponse({ totalObjects: 0, perBucket: [] }),
     });
 
     const client = createTestQueryClient();

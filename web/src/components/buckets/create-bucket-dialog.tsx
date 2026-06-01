@@ -25,7 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { AdminApiError, adminFetchJson } from "@/lib/api";
 import { bucketNameSchema } from "@/lib/bucket-name";
-import { bucketsKey, statsKey } from "@/lib/query-keys";
+import { bucketsKey, statsKey, statsObjectCountsKey } from "@/lib/query-keys";
 import { BucketCreatedSchema } from "@/lib/schemas";
 
 const formSchema = z.object({
@@ -61,6 +61,7 @@ export function CreateBucketDialog({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: bucketsKey }),
         queryClient.invalidateQueries({ queryKey: statsKey }),
+        queryClient.invalidateQueries({ queryKey: statsObjectCountsKey }),
       ]);
       toast.success(`Bucket "${name}" created`);
       onOpenChange(false);

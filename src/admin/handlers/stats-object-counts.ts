@@ -1,6 +1,6 @@
 import type { AppContext } from "../../server-context";
 import { jsonError, jsonOk } from "../errors";
-import { adminGetStats } from "../shared";
+import { adminGetObjectCounts } from "../shared";
 
 function workspaceUnavailable(): Response {
   return jsonError(
@@ -10,8 +10,10 @@ function workspaceUnavailable(): Response {
   );
 }
 
-export async function handleStatsAdmin(ctx: AppContext): Promise<Response> {
+export async function handleStatsObjectCountsAdmin(
+  ctx: AppContext,
+): Promise<Response> {
   if (ctx.gatewayWorkspaceId === null) return workspaceUnavailable();
-  const stats = await adminGetStats(ctx, ctx.gatewayWorkspaceId);
-  return jsonOk(stats);
+  const counts = await adminGetObjectCounts(ctx, ctx.gatewayWorkspaceId);
+  return jsonOk(counts);
 }

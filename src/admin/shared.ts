@@ -33,9 +33,23 @@ export async function adminListBuckets(
     }));
 }
 
-export type { BucketStat, WorkspaceStats } from "./stats-types";
+export type {
+  BucketObjectCount,
+  BucketStat,
+  WorkspaceObjectCounts,
+  WorkspaceStats,
+} from "./stats-types";
 
-import type { BucketStat, WorkspaceStats } from "./stats-types";
+import type {
+  BucketStat,
+  WorkspaceObjectCounts,
+  WorkspaceStats,
+} from "./stats-types";
+
+export function invalidateWorkspaceStats(ctx: AppContext): void {
+  ctx.statsCache.invalidate();
+  ctx.objectCountsCache.invalidate();
+}
 
 /**
  * Recursively sum file sizes and object counts under `folderId`. Uses
@@ -156,71 +170,71 @@ async function mapWithConcurrency<T, R>(
 }
 
 /**
- * Workspace stats. Default (`accurate: false`) uses Drime folder `file_size` on
- * the root listing only — O(1) Drime list per workspace. With `accurate: true`,
- * recurses every bucket (slow on high latency or large trees).
+ * Fast workspace stats from Drime root folder `file_size` (one list call).
+ * Object counts are served by {@link adminGetObjectCounts} on a separate route.
  */
 export async function adminGetStats(
   ctx: AppContext,
   W: number,
-  options?: { accurate?: boolean },
 ): Promise<WorkspaceStats> {
-  const accurate = options?.accurate === true;
-  const cached = ctx.statsCache.get(accurate);
+  const cached = ctx.statsCache.get();
   if (cached) return cached;
 
-  let stats: WorkspaceStats;
-  if (!accurate) {
-    const root = await ctx.drime.listFolder(null, W);
-    const bucketFolders = root.filter(
-      (e) => e.is_folder && isValidBucketName(e.name),
-    );
-    const perBucket: BucketStat[] = bucketFolders.map((f) => ({
-      name: f.name,
-      bytes: f.file_size,
-      objects: null,
-    }));
-    perBucket.sort((a, b) => a.name.localeCompare(b.name));
-    let totalBytes = 0;
-    for (const b of perBucket) {
-      totalBytes += b.bytes;
-    }
-    stats = {
-      buckets: bucketFolders.length,
-      totalBytes,
-      totalObjects: null,
-      perBucket,
-      source: "metadata",
-    };
-  } else {
-    const root = await ctx.listCache.getOrFetch(null, () =>
-      ctx.drime.listFolder(null, W),
-    );
-    const bucketFolders = root.filter(
-      (e) => e.is_folder && isValidBucketName(e.name),
-    );
-    const perBucket = await mapWithConcurrency(bucketFolders, 4, async (f) => {
-      const { bytes, objects } = await walkFolderSize(ctx, W, f.id);
-      return { name: f.name, bytes, objects } satisfies BucketStat;
-    });
-    perBucket.sort((a, b) => a.name.localeCompare(b.name));
-    let totalBytes = 0;
-    let totalObjects = 0;
-    for (const b of perBucket) {
-      totalBytes += b.bytes;
-      totalObjects += b.objects ?? 0;
-    }
-    stats = {
-      buckets: bucketFolders.length,
-      totalBytes,
-      totalObjects,
-      perBucket,
-      source: "walk",
-    };
+  const root = await ctx.drime.listFolder(null, W);
+  const bucketFolders = root.filter(
+    (e) => e.is_folder && isValidBucketName(e.name),
+  );
+  const perBucket: BucketStat[] = bucketFolders.map((f) => ({
+    name: f.name,
+    bytes: f.file_size,
+    objects: null,
+  }));
+  perBucket.sort((a, b) => a.name.localeCompare(b.name));
+  let totalBytes = 0;
+  for (const b of perBucket) {
+    totalBytes += b.bytes;
   }
+  const stats: WorkspaceStats = {
+    buckets: bucketFolders.length,
+    totalBytes,
+    totalObjects: null,
+    perBucket,
+    source: "metadata",
+  };
 
-  ctx.statsCache.set(stats, accurate);
+  ctx.statsCache.set(stats);
   return stats;
+}
+
+/**
+ * Exact object counts by walking every bucket tree. Slow on large workspaces
+ * or high Drime latency — intended for a separate dashboard request.
+ */
+export async function adminGetObjectCounts(
+  ctx: AppContext,
+  W: number,
+): Promise<WorkspaceObjectCounts> {
+  const cached = ctx.objectCountsCache.get();
+  if (cached) return cached;
+
+  const root = await ctx.listCache.getOrFetch(null, () =>
+    ctx.drime.listFolder(null, W),
+  );
+  const bucketFolders = root.filter(
+    (e) => e.is_folder && isValidBucketName(e.name),
+  );
+  const perBucket = await mapWithConcurrency(bucketFolders, 4, async (f) => {
+    const { objects } = await walkFolderSize(ctx, W, f.id);
+    return { name: f.name, objects };
+  });
+  perBucket.sort((a, b) => a.name.localeCompare(b.name));
+  let totalObjects = 0;
+  for (const b of perBucket) {
+    totalObjects += b.objects;
+  }
+  const counts: WorkspaceObjectCounts = { totalObjects, perBucket };
+  ctx.objectCountsCache.set(counts);
+  return counts;
 }
 
 export type CreateBucketResult =
@@ -250,7 +264,7 @@ export async function adminCreateBucket(
     // may briefly show "Bucket not found" until upstream propagation, but
     // that's preferable to seeding the wrong id.
     ctx.listCache.invalidate(null);
-    ctx.statsCache.invalidate();
+    invalidateWorkspaceStats(ctx);
     return { kind: "ok" };
   }
   ctx.folderCache.set(normalizePathKey(name), id);
@@ -307,7 +321,7 @@ export async function adminDeleteBucket(
   // consistency (which can briefly resurrect the deleted bucket).
   ctx.listCache.removeEntryById(null, folder.id);
   ctx.listCache.invalidate(folder.id);
-  ctx.statsCache.invalidate();
+  invalidateWorkspaceStats(ctx);
   ctx.folderCache.evictPrefix(normalizePathKey(name));
   return { kind: "ok" };
 }

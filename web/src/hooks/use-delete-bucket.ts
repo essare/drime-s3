@@ -2,13 +2,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { AdminApiError, adminFetchEmpty } from "@/lib/api";
-import { bucketsKey, statsKey } from "@/lib/query-keys";
+import { bucketsKey, statsKey, statsObjectCountsKey } from "@/lib/query-keys";
 
 export function useDeleteBucket() {
   const queryClient = useQueryClient();
   const invalidateBucketViews = () => {
     void queryClient.invalidateQueries({ queryKey: bucketsKey });
     void queryClient.invalidateQueries({ queryKey: statsKey });
+    void queryClient.invalidateQueries({ queryKey: statsObjectCountsKey });
   };
   return useMutation({
     mutationFn: ({ name }: { name: string }) =>
