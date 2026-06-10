@@ -70,11 +70,17 @@ function canonicalUriPath(pathname: string): string {
     return "/";
   }
   const segments = pathname.split("/");
-  const enc = segments.map((seg, i) => {
+  const enc = segments.map((seg) => {
     if (seg === "") {
-      return i === 0 ? "" : "";
+      return "";
     }
-    return uriEncodeBytes(new TextEncoder().encode(seg));
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(seg);
+    } catch {
+      decoded = seg;
+    }
+    return uriEncodeBytes(new TextEncoder().encode(decoded));
   });
   return enc.join("/") || "/";
 }
@@ -346,4 +352,9 @@ export function parseAuthorizationHeaderForTests(
   raw: string | null,
 ): ParsedAuth {
   return parseAuthorizationHeader(raw);
+}
+
+/** @internal Exported for unit tests. */
+export function canonicalUriPathForTests(pathname: string): string {
+  return canonicalUriPath(pathname);
 }
