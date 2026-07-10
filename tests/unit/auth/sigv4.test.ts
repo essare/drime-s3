@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canonicalUriPathForTests,
   computeSignatureV4ForTests,
   parseAuthorizationHeaderForTests,
   verifySignatureV4,
@@ -185,6 +186,93 @@ describe("verifySignatureV4", () => {
     const ok = await verifySignatureV4(
       new Request(url, { method: "PUT", headers }),
       { method: "PUT", url, headers },
+      { accessKey, secretKey },
+    );
+    expect(ok).toBe(true);
+  });
+});
+
+describe("canonicalUriPath", () => {
+  test("preserves already-encoded percent sequences", () => {
+    expect(
+      canonicalUriPathForTests(
+        "/bucket/folder/2026-06-10T08%3A44%3A32Z/file.blob",
+      ),
+    ).toBe("/bucket/folder/2026-06-10T08%3A44%3A32Z/file.blob");
+  });
+
+  test.each(["%40", "%2B", "%20"])("encodes %s correctly", (encoded) => {
+    expect(canonicalUriPathForTests(`/bucket/${encoded}`)).toBe(
+      `/bucket/${encoded}`,
+    );
+  });
+
+  test("encoded slash inside a segment stays in that segment", () => {
+    expect(canonicalUriPathForTests("/bucket/a%2Fb")).toBe("/bucket/a%2Fb");
+  });
+
+  test("malformed percent encoding falls back to literal re-encoding", () => {
+    expect(canonicalUriPathForTests("/bucket/a%ZZb")).toBe("/bucket/a%25ZZb");
+  });
+});
+
+describe("verifySignatureV4 percent-encoded path regression", () => {
+  test("signature computed with raw colons verifies against %3A-encoded URL", async () => {
+    const accessKey = "AKIAIOSFODNN7EXAMPLE";
+    const secretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+    const dateStamp = "20260610";
+    const amzDate = "20260610T084432Z";
+    const region = "us-east-1";
+    const svc = "s3";
+    const host = "examplebucket.s3.amazonaws.com";
+    const payloadHash =
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    const signUrl = new URL(
+      `https://${host}/bucket/folder/2026-06-10T08:44:32Z/file.blob`,
+    );
+    const signHeaders = new Headers();
+    signHeaders.set("Host", host);
+    signHeaders.set("x-amz-date", amzDate);
+    signHeaders.set("x-amz-content-sha256", payloadHash);
+    signHeaders.set(
+      "Authorization",
+      [
+        `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${svc}/aws4_request`,
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date",
+        "Signature=0000000000000000000000000000000000000000000000000000000000000000",
+      ].join(", "),
+    );
+
+    const parsed = parseAuthorizationHeaderForTests(
+      signHeaders.get("Authorization"),
+    );
+    const sig = await computeSignatureV4ForTests(
+      { method: "GET", url: signUrl, headers: signHeaders },
+      secretKey,
+      parsed,
+      payloadHash,
+    );
+
+    const verifyUrl = new URL(
+      `https://${host}/bucket/folder/2026-06-10T08%3A44%3A32Z/file.blob`,
+    );
+    const verifyHeaders = new Headers();
+    verifyHeaders.set("Host", host);
+    verifyHeaders.set("x-amz-date", amzDate);
+    verifyHeaders.set("x-amz-content-sha256", payloadHash);
+    verifyHeaders.set(
+      "Authorization",
+      [
+        `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${svc}/aws4_request`,
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date",
+        `Signature=${sig}`,
+      ].join(", "),
+    );
+
+    const ok = await verifySignatureV4(
+      new Request(verifyUrl, { method: "GET", headers: verifyHeaders }),
+      { method: "GET", url: verifyUrl, headers: verifyHeaders },
       { accessKey, secretKey },
     );
     expect(ok).toBe(true);
