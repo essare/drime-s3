@@ -219,4 +219,172 @@ describe("ListObjects", () => {
       mock.stop();
     }
   });
+
+  test("prefix filters flat keys at bucket root", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const h = { Host: "127.0.0.1:8081" };
+      const bucket = "list-prefix-flat";
+
+      await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      const root = await ctx.drime.listFolder(null, 1);
+      const b = root.find((e) => e.name === bucket);
+      if (!b) {
+        throw new Error("expected bucket folder");
+      }
+      for (const name of ["photo.jpg", "paper.txt"]) {
+        await uploadAt(mock.baseUrl, 1, b.id, name);
+      }
+      ctx.listCache.invalidate(null);
+      ctx.listCache.invalidate(b.id);
+
+      const u = new URL(`${base}/${bucket}`);
+      u.searchParams.set("list-type", "2");
+      u.searchParams.set("prefix", "ph");
+      const res = await dispatch(
+        ctx,
+        new Request(u.toString(), { method: "GET", headers: h }),
+      );
+      expect(res.status).toBe(200);
+      const xml = await res.text();
+      const j = xmlParser.parse(xml) as {
+        ListBucketResult?: {
+          KeyCount?: number;
+          Contents?: { Key?: string } | Array<{ Key?: string }>;
+        };
+      };
+      expect(j.ListBucketResult?.KeyCount).toBe(1);
+      const contents = j.ListBucketResult?.Contents;
+      const keys = Array.isArray(contents)
+        ? contents.map((c) => c.Key)
+        : contents?.Key
+          ? [contents.Key]
+          : [];
+      expect(keys).toContain("photo.jpg");
+      expect(keys).not.toContain("paper.txt");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("prefix filters keys under a subfolder", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const h = { Host: "127.0.0.1:8081" };
+      const bucket = "list-prefix-sub";
+
+      await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      const root = await ctx.drime.listFolder(null, 1);
+      const b = root.find((e) => e.name === bucket);
+      if (!b) {
+        throw new Error("expected bucket folder");
+      }
+      await ctx.drime.createFolder("logs", {
+        parentId: b.id,
+        workspaceId: 1,
+      });
+      ctx.listCache.invalidate(null);
+      ctx.listCache.invalidate(b.id);
+
+      const logs = await ctx.drime.listFolder(b.id, 1);
+      const logsFolder = logs.find((e) => e.name === "logs" && e.is_folder);
+      if (!logsFolder) {
+        throw new Error("expected logs folder");
+      }
+      for (const name of ["2026-01.log", "archive.log"]) {
+        await uploadAt(mock.baseUrl, 1, logsFolder.id, `logs/${name}`);
+      }
+      ctx.listCache.invalidate(null);
+      ctx.listCache.invalidate(b.id);
+      ctx.listCache.invalidate(logsFolder.id);
+
+      const u = new URL(`${base}/${bucket}`);
+      u.searchParams.set("list-type", "2");
+      u.searchParams.set("prefix", "logs/2026");
+      const res = await dispatch(
+        ctx,
+        new Request(u.toString(), { method: "GET", headers: h }),
+      );
+      expect(res.status).toBe(200);
+      const xml = await res.text();
+      const j = xmlParser.parse(xml) as {
+        ListBucketResult?: {
+          KeyCount?: number;
+          Contents?: { Key?: string } | Array<{ Key?: string }>;
+        };
+      };
+      expect(j.ListBucketResult?.KeyCount).toBe(1);
+      const contents = j.ListBucketResult?.Contents;
+      const keys = Array.isArray(contents)
+        ? contents.map((c) => c.Key)
+        : contents?.Key
+          ? [contents.Key]
+          : [];
+      expect(keys).toContain("logs/2026-01.log");
+      expect(keys).not.toContain("logs/archive.log");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("prefix with delimiter returns matching CommonPrefixes", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const h = { Host: "127.0.0.1:8081" };
+      const bucket = "list-prefix-delim";
+
+      await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      const root = await ctx.drime.listFolder(null, 1);
+      const b = root.find((e) => e.name === bucket);
+      if (!b) {
+        throw new Error("expected bucket folder");
+      }
+      await ctx.drime.createFolder("nested", {
+        parentId: b.id,
+        workspaceId: 1,
+      });
+      await uploadAt(mock.baseUrl, 1, b.id, "other.txt");
+      ctx.listCache.invalidate(null);
+      ctx.listCache.invalidate(b.id);
+
+      const u = new URL(`${base}/${bucket}`);
+      u.searchParams.set("delimiter", "/");
+      u.searchParams.set("prefix", "n");
+      const res = await dispatch(
+        ctx,
+        new Request(u.toString(), { method: "GET", headers: h }),
+      );
+      expect(res.status).toBe(200);
+      const xml = await res.text();
+      expect(xml).toContain("CommonPrefixes");
+      expect(xml).toContain("nested/");
+      expect(xml).not.toContain("other.txt");
+    } finally {
+      mock.stop();
+    }
+  });
 });

@@ -212,16 +212,21 @@ export async function listObjectsCore(
     }
   }
 
-  const folderPath = prefix.replace(/\/+$/, "");
+  // Split prefix into the directory portion (for folder navigation) and the
+  // file-name portion (applied as a filter after listing). This is necessary
+  // because the S3 `prefix` parameter is a string-prefix filter, not a folder
+  // path — e.g. `prefix=p` means "all keys starting with p", not "folder p".
+  const lastSlash = prefix.lastIndexOf("/");
+  const dirPath = lastSlash >= 0 ? prefix.slice(0, lastSlash) : "";
   let folderId = bucketFolderId;
   let basePrefix = "";
 
-  if (folderPath.length > 0) {
+  if (dirPath.length > 0) {
     const resolved = await resolveFolderUnder(
       ctx,
       W,
       bucketFolderId,
-      folderPath,
+      dirPath,
     );
     if (resolved === NOT_FOUND) {
       return {
@@ -239,7 +244,7 @@ export async function listObjectsCore(
       };
     }
     folderId = resolved;
-    basePrefix = `${folderPath}/`;
+    basePrefix = `${dirPath}/`;
   }
 
   let contents: ListBucketEntry[] = [];
@@ -253,7 +258,12 @@ export async function listObjectsCore(
     contents = await listRecursive(ctx, W, folderId, basePrefix);
   }
 
-  const rows = mergeRows(contents, folders);
+  // Apply the full prefix as a string filter (covers the file-name portion that
+  // wasn't consumed by folder navigation above).
+  const allRows = mergeRows(contents, folders);
+  const rows = prefix
+    ? allRows.filter((r) => r.sortKey.startsWith(prefix))
+    : allRows;
   let start = 0;
   const decoded = decodeToken(tokenIn);
   const dNorm = delimiter;
