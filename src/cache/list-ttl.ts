@@ -3,9 +3,8 @@ import type { FileEntry } from "../drime/types";
 const TTL_MS = 5000;
 const MAX_CACHED_KEYS = 5000;
 
-function cacheKey(folderId: number | null, workspaceId?: number): string {
-  const base = folderId === null ? "__root__" : String(folderId);
-  return workspaceId !== undefined ? `${base}:w${workspaceId}` : base;
+function cacheKey(folderId: number | null): string {
+  return folderId === null ? "__root__" : String(folderId);
 }
 
 type Cached = { ts: number; entries: FileEntry[] };
@@ -18,8 +17,8 @@ export class ListTtlCache {
   private readonly inflight = new Map<string, Promise<FileEntry[]>>();
 
   /** Drop cached listing for this folder (call after writes under that folder). */
-  invalidate(folderId: number | null, workspaceId?: number): void {
-    this.cache.delete(cacheKey(folderId, workspaceId));
+  invalidate(folderId: number | null): void {
+    this.cache.delete(cacheKey(folderId));
   }
 
   /**
@@ -29,8 +28,8 @@ export class ListTtlCache {
    * seeded entry survives the original TTL window. No-op when the listing is
    * not currently cached — the next read will fetch fresh from upstream.
    */
-  addEntry(folderId: number | null, entry: FileEntry, workspaceId?: number): void {
-    const cached = this.cache.get(cacheKey(folderId, workspaceId));
+  addEntry(folderId: number | null, entry: FileEntry): void {
+    const cached = this.cache.get(cacheKey(folderId));
     if (!cached) return;
     const idx = cached.entries.findIndex((e) => e.id === entry.id);
     if (idx >= 0) cached.entries[idx] = entry;
@@ -44,8 +43,8 @@ export class ListTtlCache {
    * Refreshes the cache timestamp on hit so the post-delete view survives the
    * original TTL window.
    */
-  removeEntryById(folderId: number | null, id: number, workspaceId?: number): void {
-    const cached = this.cache.get(cacheKey(folderId, workspaceId));
+  removeEntryById(folderId: number | null, id: number): void {
+    const cached = this.cache.get(cacheKey(folderId));
     if (!cached) return;
     const before = cached.entries.length;
     cached.entries = cached.entries.filter((e) => e.id !== id);
@@ -63,9 +62,8 @@ export class ListTtlCache {
   async getOrFetch(
     folderId: number | null,
     fetcher: () => Promise<FileEntry[]>,
-    workspaceId?: number,
   ): Promise<FileEntry[]> {
-    const k = cacheKey(folderId, workspaceId);
+    const k = cacheKey(folderId);
     const now = Date.now();
     const hit = this.cache.get(k);
     if (hit && now - hit.ts < TTL_MS) {
