@@ -222,12 +222,7 @@ export async function listObjectsCore(
   let basePrefix = "";
 
   if (dirPath.length > 0) {
-    const resolved = await resolveFolderUnder(
-      ctx,
-      W,
-      bucketFolderId,
-      dirPath,
-    );
+    const resolved = await resolveFolderUnder(ctx, W, bucketFolderId, dirPath);
     if (resolved === NOT_FOUND) {
       return {
         prefix,
