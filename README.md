@@ -93,7 +93,7 @@ aws s3 cp s3://my-bucket/h.txt -
 
 If **`aws s3 rb`** says the bucket is not empty, empty it first or use **`--force`**.
 
-**Other clients:** set the **custom S3 endpoint** to your gateway; from Docker on the host, **`http://host.docker.internal:<port>`** often works. Prefer a **recent release** (e.g. **≥ v1.0.4**) for strict ETag clients such as Duplicati.
+**Other clients:** set the **custom S3 endpoint** to your gateway; from Docker on the host, **`http://host.docker.internal:<port>`** often works. By default, downloads use the stored/weak ETag; set **`DRIME_S3_STRONG_ETAG=1`** to compute strong MD5 ETags for strict clients such as Duplicati.
 
 ---
 

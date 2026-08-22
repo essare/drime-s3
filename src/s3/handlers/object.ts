@@ -332,6 +332,27 @@ function contentEtagBufferMaxBytes(): number {
   return Number.isFinite(n) && n > 0 ? n : 64 * 1024 * 1024;
 }
 
+export function strongEtagEnabled(): boolean {
+  const raw = process.env.DRIME_S3_STRONG_ETAG?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
+export function shouldBufferBodyForEtag(opts: {
+  strongEtag: boolean;
+  hasStrongMetadata: boolean;
+  size: number;
+  bufferMaxBytes: number;
+  hasRange: boolean;
+  upstreamStatus: number;
+}): boolean {
+  if (!opts.strongEtag) return false;
+  if (opts.hasStrongMetadata) return false;
+  if (opts.hasRange) return false;
+  if (opts.upstreamStatus !== 200) return false;
+  if (opts.size < 0 || opts.size > opts.bufferMaxBytes) return false;
+  return true;
+}
+
 /** Full GET (status 200) to derive quoted MD5 ETag; used for HEAD when metadata is weak. */
 async function etagQuotedFromFullDownload(
   ctx: AppContext,
@@ -413,12 +434,18 @@ export async function handleObjectRequest(
     const { entry } = resolved;
     const downloadUrl = resolveDownloadUrl(entry, ctx);
     let etag = etagFromFileEntry(entry);
-    if (!entryHasStrongContentEtag(entry)) {
-      const sz = entry.file_size ?? 0;
-      if (sz >= 0 && sz <= contentEtagBufferMaxBytes()) {
-        const q = await etagQuotedFromFullDownload(ctx, downloadUrl);
-        if (q !== null) etag = q;
-      }
+    if (
+      shouldBufferBodyForEtag({
+        strongEtag: strongEtagEnabled(),
+        hasStrongMetadata: entryHasStrongContentEtag(entry),
+        size: entry.file_size ?? 0,
+        bufferMaxBytes: contentEtagBufferMaxBytes(),
+        hasRange: false,
+        upstreamStatus: 200,
+      })
+    ) {
+      const q = await etagQuotedFromFullDownload(ctx, downloadUrl);
+      if (q !== null) etag = q;
     }
     return new Response(null, {
       status: 200,
@@ -465,8 +492,14 @@ export async function handleObjectRequest(
     const strong = entryHasStrongContentEtag(entry);
     const maxBuf = contentEtagBufferMaxBytes();
     const sz = entry.file_size ?? 0;
-    const bufferBody =
-      !range && upstream.status === 200 && !strong && sz >= 0 && sz <= maxBuf;
+    const bufferBody = shouldBufferBodyForEtag({
+      strongEtag: strongEtagEnabled(),
+      hasStrongMetadata: strong,
+      size: sz,
+      bufferMaxBytes: maxBuf,
+      hasRange: Boolean(range),
+      upstreamStatus: upstream.status,
+    });
 
     if (bufferBody) {
       const buf = Buffer.from(await upstream.arrayBuffer());
