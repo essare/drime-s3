@@ -1,0 +1,387 @@
+{
+  "kind": "drime-s3-optimized",
+  "startedAt": "2026-08-22T02:07:23.658Z",
+  "finishedAt": "2026-08-22T02:19:00.886Z",
+  "gitSha": "a681edbf9e496e22afdb456f4b1c8146bffda71b",
+  "gitDescribe": "v1.5.4-6-ga681edb",
+  "gatewayVersion": "v1.5.4-6-ga681edb",
+  "endpoint": "http://127.0.0.1:8082",
+  "bucket": "bench-20260822-c16",
+  "runs": 3,
+  "insecure": false,
+  "envKnobs": {
+    "DRIME_S3_MULTIPART_PART_CONCURRENCY": "16",
+    "DRIME_S3_MULTIPART_THRESHOLD_BYTES": "94371840 (default)",
+    "DRIME_S3_MULTIPART_PART_SIZE_BYTES": "16777216 (default)",
+    "DRIME_S3_CONTENT_ETAG_BUFFER_BYTES": "67108864 (default)"
+  },
+  "results": [
+    {
+      "op": "CreateBucket",
+      "attempts": [
+        {
+          "durationMs": 4753.120417,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 4753.120417,
+      "minDurationMs": 4753.120417,
+      "maxDurationMs": 4753.120417,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "PUT aws-s3-cp 10m",
+      "bytes": 10485760,
+      "key": "ladder/10m.bin",
+      "attempts": [
+        {
+          "durationMs": 17413.83425,
+          "ok": true
+        },
+        {
+          "durationMs": 10895.836875,
+          "ok": true
+        },
+        {
+          "durationMs": 10299.545542,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 10895.836875,
+      "minDurationMs": 10299.545542,
+      "maxDurationMs": 17413.83425,
+      "medianThroughputMibPerSec": 0.9177817284457096
+    },
+    {
+      "op": "PUT aws-s3-cp 100m",
+      "bytes": 104857600,
+      "key": "ladder/100m.bin",
+      "attempts": [
+        {
+          "durationMs": 17507.418750000004,
+          "ok": true
+        },
+        {
+          "durationMs": 23015.744459,
+          "ok": true
+        },
+        {
+          "durationMs": 12896.865458,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 17507.418750000004,
+      "minDurationMs": 12896.865458,
+      "maxDurationMs": 23015.744459,
+      "medianThroughputMibPerSec": 5.71186429181629
+    },
+    {
+      "op": "PUT aws-s3-cp 512m",
+      "bytes": 536870912,
+      "key": "ladder/512m.bin",
+      "attempts": [
+        {
+          "durationMs": 28641.071249999994,
+          "ok": true
+        },
+        {
+          "durationMs": 32379.857583999998,
+          "ok": true
+        },
+        {
+          "durationMs": 43180.17749999999,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 32379.857583999998,
+      "minDurationMs": 28641.071249999994,
+      "maxDurationMs": 43180.17749999999,
+      "medianThroughputMibPerSec": 15.812299318234086
+    },
+    {
+      "op": "GET aws-s3-cp 10m",
+      "bytes": 10485760,
+      "key": "ladder/10m.bin",
+      "attempts": [
+        {
+          "durationMs": 8305.146625000023,
+          "ok": true
+        },
+        {
+          "durationMs": 6141.74333300002,
+          "ok": true
+        },
+        {
+          "durationMs": 2699.1823330000043,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 6141.74333300002,
+      "minDurationMs": 2699.1823330000043,
+      "maxDurationMs": 8305.146625000023,
+      "medianThroughputMibPerSec": 1.6282021989211588
+    },
+    {
+      "op": "GET aws-s3-cp 100m",
+      "bytes": 104857600,
+      "key": "ladder/100m.bin",
+      "attempts": [
+        {
+          "durationMs": 7423.043458,
+          "ok": true
+        },
+        {
+          "durationMs": 8785.101292000007,
+          "ok": true
+        },
+        {
+          "durationMs": 14350.290542000002,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 8785.101292000007,
+      "minDurationMs": 7423.043458,
+      "maxDurationMs": 14350.290542000002,
+      "medianThroughputMibPerSec": 11.38290802532501
+    },
+    {
+      "op": "GET aws-s3-cp 512m",
+      "bytes": 536870912,
+      "key": "ladder/512m.bin",
+      "attempts": [
+        {
+          "durationMs": 25891.217542,
+          "ok": true
+        },
+        {
+          "durationMs": 40251.768041,
+          "ok": true
+        },
+        {
+          "durationMs": 33413.81858400005,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 33413.81858400005,
+      "minDurationMs": 25891.217542,
+      "maxDurationMs": 40251.768041,
+      "medianThroughputMibPerSec": 15.323001730941558
+    },
+    {
+      "op": "HEAD 10m",
+      "bytes": 10485760,
+      "key": "ladder/10m.bin",
+      "attempts": [
+        {
+          "durationMs": 2726.031583999982,
+          "ok": true
+        },
+        {
+          "durationMs": 2288.7432499999995,
+          "ok": true
+        },
+        {
+          "durationMs": 278.47070900001563,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 2288.7432499999995,
+      "minDurationMs": 278.47070900001563,
+      "maxDurationMs": 2726.031583999982,
+      "medianThroughputMibPerSec": 4.36921004573143
+    },
+    {
+      "op": "HEAD 100m",
+      "bytes": 104857600,
+      "key": "ladder/100m.bin",
+      "attempts": [
+        {
+          "durationMs": 273.74875000002794,
+          "ok": true
+        },
+        {
+          "durationMs": 280.5832919999957,
+          "ok": true
+        },
+        {
+          "durationMs": 276.6219999999739,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 276.6219999999739,
+      "minDurationMs": 273.74875000002794,
+      "maxDurationMs": 280.5832919999957,
+      "medianThroughputMibPerSec": 361.5041464525939
+    },
+    {
+      "op": "HEAD 512m",
+      "bytes": 536870912,
+      "key": "ladder/512m.bin",
+      "attempts": [
+        {
+          "durationMs": 277.2856250000186,
+          "ok": true
+        },
+        {
+          "durationMs": 277.1689999999944,
+          "ok": true
+        },
+        {
+          "durationMs": 285.1078339999658,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 277.2856250000186,
+      "minDurationMs": 277.1689999999944,
+      "maxDurationMs": 285.1078339999658,
+      "medianThroughputMibPerSec": 1846.4714858549396
+    },
+    {
+      "op": "ListObjects delimiter=/",
+      "attempts": [
+        {
+          "durationMs": 5407.254917000013,
+          "ok": true
+        },
+        {
+          "durationMs": 1766.1076250000042,
+          "ok": true
+        },
+        {
+          "durationMs": 2914.5125409999746,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 2914.5125409999746,
+      "minDurationMs": 1766.1076250000042,
+      "maxDurationMs": 5407.254917000013,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "ListObjects recursive",
+      "attempts": [
+        {
+          "durationMs": 285.4496250000084,
+          "ok": true
+        },
+        {
+          "durationMs": 2141.548124999972,
+          "ok": true
+        },
+        {
+          "durationMs": 2181.910042000003,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 2141.548124999972,
+      "minDurationMs": 285.4496250000084,
+      "maxDurationMs": 2181.910042000003,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "CopyObject 100m",
+      "bytes": 104857600,
+      "key": "ladder/100m-copy.bin",
+      "attempts": [
+        {
+          "durationMs": 30727.656541999953,
+          "ok": false,
+          "error": "copy failed (exit 1): copy failed: s3://bench-20260822-c16/ladder/100m.bin to s3://bench-20260822-c16/ladder/100m-copy.bin An error occurred (Unknown) when calling the UploadPartCopy operation (reached max retries: 4): Unknown"
+        },
+        {
+          "durationMs": 31459.357166,
+          "ok": false,
+          "error": "copy failed (exit 1): copy failed: s3://bench-20260822-c16/ladder/100m.bin to s3://bench-20260822-c16/ladder/100m-copy.bin An error occurred (Unknown) when calling the UploadPartCopy operation (reached max retries: 4): Unknown"
+        },
+        {
+          "durationMs": 31825.489459000004,
+          "ok": false,
+          "error": "copy failed (exit 1): copy failed: s3://bench-20260822-c16/ladder/100m.bin to s3://bench-20260822-c16/ladder/100m-copy.bin An error occurred (Unknown) when calling the UploadPartCopy operation (reached max retries: 4): Unknown"
+        }
+      ],
+      "medianDurationMs": 0,
+      "minDurationMs": 0,
+      "maxDurationMs": 0,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "Multipart s3api 100m",
+      "bytes": 104857600,
+      "key": "ladder/100m-multipart-explicit.bin",
+      "attempts": [
+        {
+          "durationMs": 70773.39924999996,
+          "ok": true
+        },
+        {
+          "durationMs": 66634.67545799993,
+          "ok": true
+        },
+        {
+          "durationMs": 80214.7037089999,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 70773.39924999996,
+      "minDurationMs": 66634.67545799993,
+      "maxDurationMs": 80214.7037089999,
+      "medianThroughputMibPerSec": 1.412960251446451
+    },
+    {
+      "op": "DeleteObject 10m",
+      "attempts": [
+        {
+          "durationMs": 2935.0866249999963,
+          "ok": true
+        },
+        {
+          "durationMs": 1123.969999999972,
+          "ok": true
+        },
+        {
+          "durationMs": 269.0610840000445,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 1123.969999999972,
+      "minDurationMs": 269.0610840000445,
+      "maxDurationMs": 2935.0866249999963,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "DeleteRecursive ladder/",
+      "attempts": [
+        {
+          "durationMs": 2869.3945829999866,
+          "ok": true
+        },
+        {
+          "durationMs": 4186.031458999962,
+          "ok": true
+        },
+        {
+          "durationMs": 2455.1465420000022,
+          "ok": true
+        }
+      ],
+      "medianDurationMs": 2869.3945829999866,
+      "minDurationMs": 2455.1465420000022,
+      "maxDurationMs": 4186.031458999962,
+      "medianThroughputMibPerSec": null
+    },
+    {
+      "op": "DeleteBucket",
+      "attempts": [
+        {
+          "durationMs": 1813.3649170000572,
+          "ok": false,
+          "error": "rb failed (exit 1): remove_bucket failed: s3://bench-20260822-c16 An error occurred () when calling the DeleteBucket operation:"
+        }
+      ],
+      "medianDurationMs": 0,
+      "minDurationMs": 0,
+      "maxDurationMs": 0,
+      "medianThroughputMibPerSec": null
+    }
+  ]
+}
