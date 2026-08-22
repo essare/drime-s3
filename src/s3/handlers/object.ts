@@ -73,6 +73,12 @@ export async function ensureParentFolderForPut(
   let pathAccum = "";
   for (const folderName of parts) {
     pathAccum = pathAccum ? `${pathAccum}/${folderName}` : folderName;
+    const cacheKey = normalizePathKey(`${bucket}/${pathAccum}`);
+    const cachedId = ctx.folderCache.get(cacheKey);
+    if (cachedId !== undefined) {
+      currentPid = cachedId;
+      continue;
+    }
     const entries = await ctx.listCache.getOrFetch(currentPid, () =>
       ctx.drime.listFolder(currentPid, W),
     );
