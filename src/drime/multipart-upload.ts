@@ -32,8 +32,14 @@ export function getMultipartPartSizeBytes(): number {
 /** S3 limit on number of parts per upload. */
 const MAX_PARTS = 10_000;
 
-/** Concurrent in-flight parts per upload. */
-const PART_CONCURRENCY = 4;
+const DEFAULT_PART_CONCURRENCY = 12;
+
+export function getMultipartPartConcurrency(): number {
+  return parsePositiveInt(
+    process.env.DRIME_S3_MULTIPART_PART_CONCURRENCY,
+    DEFAULT_PART_CONCURRENCY,
+  );
+}
 
 /** Batch size when calling `s3/multipart/batch-sign-part-urls`. */
 const SIGN_BATCH_SIZE = 100;
@@ -110,7 +116,7 @@ export async function uploadFileViaInternalMultipart(
     const signed = await batchSignAllParts(ctx, drimeKey, uploadId, partCount);
 
     let cursor = 1;
-    const lanes = Math.min(PART_CONCURRENCY, partCount);
+    const lanes = Math.min(getMultipartPartConcurrency(), partCount);
     await Promise.all(
       Array.from({ length: lanes }, async () => {
         while (true) {
