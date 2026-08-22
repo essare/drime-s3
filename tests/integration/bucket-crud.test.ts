@@ -108,6 +108,82 @@ describe("bucket CRUD", () => {
     }
   });
 
+  test("DELETE non-empty bucket returns 409 BucketNotEmpty; empty returns 204", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const bucket = "delete-bucket";
+      const objectKey = "object.txt";
+      const h = { Host: "127.0.0.1:8081" };
+
+      let res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      expect(res.status).toBe(200);
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/${objectKey}`, {
+          method: "PUT",
+          headers: {
+            ...h,
+            "Content-Type": "text/plain",
+            "Content-Length": "6",
+          },
+          body: "stored",
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "DELETE", headers: h }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain("BucketNotEmpty");
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/${objectKey}`, {
+          method: "DELETE",
+          headers: h,
+        }),
+      );
+      expect(res.status).toBe(204);
+
+      const originalListFolder = ctx.drime.listFolder.bind(ctx.drime);
+      const rootEntries = await originalListFolder(null, 1);
+      const bucketFolder = rootEntries.find((entry) => entry.name === bucket);
+      expect(bucketFolder).toBeDefined();
+      ctx.drime.listFolder = async (parentId, workspaceId) => {
+        const entries = await originalListFolder(parentId, workspaceId);
+        return parentId === bucketFolder?.id
+          ? [...entries, bucketFolder]
+          : entries;
+      };
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "DELETE", headers: h }),
+      );
+      expect(res.status).toBe(204);
+      expect(res.headers.get("content-length")).toBe("0");
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "HEAD", headers: h }),
+      );
+      expect(res.status).toBe(404);
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("GET ?location returns LocationConstraint", async () => {
     const mock = await startMockDrime({ seedRootFolders: ["loc-bucket"] });
     try {

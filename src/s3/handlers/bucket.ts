@@ -158,7 +158,10 @@ async function handleDeleteBucket(
     return xmlErr(404, "NoSuchBucket", "The specified bucket does not exist.");
   }
 
-  const children = await ctx.drime.listFolder(folder.id, W);
+  ctx.listCache.invalidate(folder.id);
+  const children = (await ctx.drime.listFolder(folder.id, W)).filter(
+    (entry) => entry.id !== folder.id,
+  );
   if (children.length > 0) {
     return xmlErr(
       409,
@@ -167,12 +170,21 @@ async function handleDeleteBucket(
     );
   }
 
-  await ctx.drime.deleteEntriesForever([folder.id]);
+  try {
+    await ctx.drime.deleteEntriesForever([folder.id]);
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.trim() : String(error).trim();
+    return xmlErr(500, "InternalError", detail || "Bucket deletion failed.");
+  }
   ctx.listCache.invalidate(null);
   ctx.listCache.invalidate(folder.id);
   ctx.folderCache.evictPrefix(normalizePathKey(bucket));
 
-  return new Response(null, { status: 204 });
+  return new Response("", {
+    status: 204,
+    headers: { "Content-Length": "0" },
+  });
 }
 
 async function handleHeadBucket(
