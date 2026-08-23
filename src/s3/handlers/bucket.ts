@@ -18,6 +18,35 @@ function xmlErr(status: number, code: string, message: string): Response {
   });
 }
 
+/**
+ * S3 has no real folders; Drime does. After object deletes, empty prefix folders
+ * often remain and block DeleteBucket. Walk the bucket tree: if any file remains,
+ * return null (BucketNotEmpty). If only empty folders remain, return their ids
+ * deepest-first so they can be deleted before the bucket root.
+ */
+async function collectEmptyDescendantFolderIds(
+  ctx: AppContext,
+  folderId: number,
+  workspaceId: number,
+): Promise<number[] | null> {
+  const children = (await ctx.drime.listFolder(folderId, workspaceId)).filter(
+    (entry) => entry.id !== folderId,
+  );
+  const deepFirst: number[] = [];
+  for (const child of children) {
+    if (!child.is_folder) return null;
+    const nested = await collectEmptyDescendantFolderIds(
+      ctx,
+      child.id,
+      workspaceId,
+    );
+    if (nested === null) return null;
+    deepFirst.push(...nested, child.id);
+  }
+  return deepFirst;
+}
+
+
 export async function findRootFolder(
   ctx: AppContext,
   workspaceId: number,
@@ -159,10 +188,12 @@ async function handleDeleteBucket(
   }
 
   ctx.listCache.invalidate(folder.id);
-  const children = (await ctx.drime.listFolder(folder.id, W)).filter(
-    (entry) => entry.id !== folder.id,
+  const emptyFolderIds = await collectEmptyDescendantFolderIds(
+    ctx,
+    folder.id,
+    W,
   );
-  if (children.length > 0) {
+  if (emptyFolderIds === null) {
     return xmlErr(
       409,
       "BucketNotEmpty",
@@ -171,6 +202,11 @@ async function handleDeleteBucket(
   }
 
   try {
+    if (emptyFolderIds.length > 0) {
+      await ctx.drime.deleteEntriesForever(emptyFolderIds);
+      for (const id of emptyFolderIds) ctx.listCache.invalidate(id);
+      ctx.listCache.invalidate(folder.id);
+    }
     await ctx.drime.deleteEntriesForever([folder.id]);
   } catch (error) {
     const detail =

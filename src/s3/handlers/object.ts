@@ -338,9 +338,15 @@ function contentEtagBufferMaxBytes(): number {
   return Number.isFinite(n) && n > 0 ? n : 64 * 1024 * 1024;
 }
 
+/**
+ * Strong MD5 ETag buffering for HEAD/GET when FileEntry metadata is weak.
+ * Default ON (Duplicati and other strict clients). Set DRIME_S3_STRONG_ETAG=0
+ * to skip full-body downloads for speed.
+ */
 export function strongEtagEnabled(): boolean {
   const raw = process.env.DRIME_S3_STRONG_ETAG?.trim().toLowerCase();
-  return raw === "1" || raw === "true";
+  if (raw === undefined || raw === "") return true;
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no");
 }
 
 export function shouldBufferBodyForEtag(opts: {

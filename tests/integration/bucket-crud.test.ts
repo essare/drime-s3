@@ -184,6 +184,74 @@ describe("bucket CRUD", () => {
     }
   });
 
+  test("DELETE bucket succeeds when only empty prefix folders remain after object delete", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const bucket = "prefix-bucket";
+      const objectKey = "ladder/nested/object.txt";
+      const h = { Host: "127.0.0.1:8081" };
+
+      let res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      expect(res.status).toBe(200);
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/${objectKey}`, {
+          method: "PUT",
+          headers: {
+            ...h,
+            "Content-Type": "text/plain",
+            "Content-Length": "6",
+          },
+          body: "stored",
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/${objectKey}`, {
+          method: "DELETE",
+          headers: h,
+        }),
+      );
+      expect(res.status).toBe(204);
+
+      // Recursive list looks empty, but Drime still has empty prefix folders.
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}?list-type=2`, {
+          method: "GET",
+          headers: h,
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("<KeyCount>0</KeyCount>");
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "DELETE", headers: h }),
+      );
+      expect(res.status).toBe(204);
+
+      res = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "HEAD", headers: h }),
+      );
+      expect(res.status).toBe(404);
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("GET ?location returns LocationConstraint", async () => {
     const mock = await startMockDrime({ seedRootFolders: ["loc-bucket"] });
     try {

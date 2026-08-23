@@ -1,5 +1,29 @@
-import { describe, expect, test } from "bun:test";
-import { shouldBufferBodyForEtag } from "../../../src/s3/handlers/object";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  shouldBufferBodyForEtag,
+  strongEtagEnabled,
+} from "../../../src/s3/handlers/object";
+
+describe("strongEtagEnabled", () => {
+  const prev = process.env.DRIME_S3_STRONG_ETAG;
+
+  afterEach(() => {
+    if (prev === undefined) delete process.env.DRIME_S3_STRONG_ETAG;
+    else process.env.DRIME_S3_STRONG_ETAG = prev;
+  });
+
+  test("defaults to true when unset (Duplicati-compatible)", () => {
+    delete process.env.DRIME_S3_STRONG_ETAG;
+    expect(strongEtagEnabled()).toBe(true);
+  });
+
+  test("can be disabled with 0/false", () => {
+    process.env.DRIME_S3_STRONG_ETAG = "0";
+    expect(strongEtagEnabled()).toBe(false);
+    process.env.DRIME_S3_STRONG_ETAG = "false";
+    expect(strongEtagEnabled()).toBe(false);
+  });
+});
 
 describe("shouldBufferBodyForEtag", () => {
   const base = {
@@ -10,7 +34,7 @@ describe("shouldBufferBodyForEtag", () => {
     upstreamStatus: 200,
   };
 
-  test("default (strongEtag false) never buffers", () => {
+  test("strongEtag false never buffers", () => {
     expect(shouldBufferBodyForEtag({ ...base, strongEtag: false })).toBe(false);
   });
 
