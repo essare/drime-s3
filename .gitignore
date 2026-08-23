@@ -3,6 +3,7 @@ node_modules/
 dist/
 .worktrees/
 .superpowers/
+.agents/
 
 # Local large binaries for scripts/real-large-s3-upload.ts
 scripts/bin/*
