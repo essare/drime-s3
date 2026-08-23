@@ -46,7 +46,6 @@ async function collectEmptyDescendantFolderIds(
   return deepFirst;
 }
 
-
 export async function findRootFolder(
   ctx: AppContext,
   workspaceId: number,
