@@ -91,9 +91,9 @@ echo hi > /tmp/h.txt && aws s3 cp /tmp/h.txt s3://my-bucket/h.txt
 aws s3 cp s3://my-bucket/h.txt -
 ```
 
-If **`aws s3 rb`** says the bucket is not empty, empty it first or use **`--force`**.
+**`aws s3 rb`** works when the bucket has no objects left — including after nested keys leave empty prefix folders (those are pruned on DeleteBucket). If objects remain, empty the bucket first or use **`--force`**.
 
-**Other clients:** set the **custom S3 endpoint** to your gateway; from Docker on the host, **`http://host.docker.internal:<port>`** often works. Prefer a **recent release** (e.g. **≥ v1.0.4**) for strict ETag clients such as Duplicati.
+**Other clients:** set the **custom S3 endpoint** to your gateway; from Docker on the host, **`http://host.docker.internal:<port>`** often works. Strong MD5 ETags are **on by default** (needed by strict clients such as **Duplicati**). Set **`DRIME_S3_STRONG_ETAG=0`** only if you prefer faster HEAD/GET and do not need content-MD5 ETags.
 
 ---
 
@@ -116,7 +116,7 @@ bun run start              # http://127.0.0.1:8081
 # bun run web:dev          # UI only (Vite)
 ```
 
-Optional **`~/.config/drime-s3/config.toml`**. Full env list: **`src/config.ts`** and **`.env.example`**. S3 trace logging: **`DRIME_S3_HTTP_TRACE=1`** (add **`DRIME_S3_HTTP_TRACE_VERBOSE=1`** for response headers).
+Optional **`~/.config/drime-s3/config.toml`**. Full env list: **`src/config.ts`** and **`.env.example`**. Useful knobs: **`DRIME_S3_STRONG_ETAG`** (default on; set `0` to skip body MD5), **`DRIME_S3_MULTIPART_PART_CONCURRENCY`** (default **12**, gateway-internal large PUT). S3 trace logging: **`DRIME_S3_HTTP_TRACE=1`** (add **`DRIME_S3_HTTP_TRACE_VERBOSE=1`** for response headers).
 
 ---
 

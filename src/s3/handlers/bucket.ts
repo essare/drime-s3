@@ -18,6 +18,35 @@ function xmlErr(status: number, code: string, message: string): Response {
   });
 }
 
+/**
+ * S3 has no real folders; Drime does. After object deletes, empty prefix folders
+ * often remain and block DeleteBucket. Walk the bucket tree: if any file remains,
+ * return null (BucketNotEmpty). If only empty folders remain, return their ids
+ * deepest-first so they can be deleted before the bucket root.
+ */
+async function collectEmptyDescendantFolderIds(
+  ctx: AppContext,
+  folderId: number,
+  workspaceId: number,
+): Promise<number[] | null> {
+  const children = (await ctx.drime.listFolder(folderId, workspaceId)).filter(
+    (entry) => entry.id !== folderId,
+  );
+  const deepFirst: number[] = [];
+  for (const child of children) {
+    if (!child.is_folder) return null;
+    const nested = await collectEmptyDescendantFolderIds(
+      ctx,
+      child.id,
+      workspaceId,
+    );
+    if (nested === null) return null;
+    deepFirst.push(...nested, child.id);
+  }
+  return deepFirst;
+}
+
+
 export async function findRootFolder(
   ctx: AppContext,
   workspaceId: number,
@@ -158,8 +187,13 @@ async function handleDeleteBucket(
     return xmlErr(404, "NoSuchBucket", "The specified bucket does not exist.");
   }
 
-  const children = await ctx.drime.listFolder(folder.id, W);
-  if (children.length > 0) {
+  ctx.listCache.invalidate(folder.id);
+  const emptyFolderIds = await collectEmptyDescendantFolderIds(
+    ctx,
+    folder.id,
+    W,
+  );
+  if (emptyFolderIds === null) {
     return xmlErr(
       409,
       "BucketNotEmpty",
@@ -167,12 +201,26 @@ async function handleDeleteBucket(
     );
   }
 
-  await ctx.drime.deleteEntriesForever([folder.id]);
+  try {
+    if (emptyFolderIds.length > 0) {
+      await ctx.drime.deleteEntriesForever(emptyFolderIds);
+      for (const id of emptyFolderIds) ctx.listCache.invalidate(id);
+      ctx.listCache.invalidate(folder.id);
+    }
+    await ctx.drime.deleteEntriesForever([folder.id]);
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.trim() : String(error).trim();
+    return xmlErr(500, "InternalError", detail || "Bucket deletion failed.");
+  }
   ctx.listCache.invalidate(null);
   ctx.listCache.invalidate(folder.id);
   ctx.folderCache.evictPrefix(normalizePathKey(bucket));
 
-  return new Response(null, { status: 204 });
+  return new Response("", {
+    status: 204,
+    headers: { "Content-Length": "0" },
+  });
 }
 
 async function handleHeadBucket(
