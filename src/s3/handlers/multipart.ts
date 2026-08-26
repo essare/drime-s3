@@ -12,15 +12,15 @@ import {
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
+import { buildObjectDescription } from "../tagging";
 import {
   completeMultipartUploadXml,
   initiateMultipartUploadXml,
   listPartsResultXml,
 } from "../xml";
-import { buildObjectDescription } from "../tagging";
 import { findRootFolder } from "./bucket";
-import { resolveObjectKey } from "./object-resolve";
 import { ensureParentFolderForPut } from "./object";
+import { resolveObjectKey } from "./object-resolve";
 
 /** Parse Drime `POST /s3/entries` (or similar) JSON for a file entry id. */
 function parseFileEntryId(raw: unknown): number | undefined {
