@@ -17,8 +17,20 @@ import {
   initiateMultipartUploadXml,
   listPartsResultXml,
 } from "../xml";
+import { buildObjectDescription } from "../tagging";
 import { findRootFolder } from "./bucket";
+import { resolveObjectKey } from "./object-resolve";
 import { ensureParentFolderForPut } from "./object";
+
+/** Parse Drime `POST /s3/entries` (or similar) JSON for a file entry id. */
+function parseFileEntryId(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const fe = o.fileEntry ?? o.file ?? o.entry;
+  if (!fe || typeof fe !== "object") return undefined;
+  const id = (fe as Record<string, unknown>).id;
+  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
+}
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -423,6 +435,41 @@ export async function handleMultipartRequest(
       finalSize = session.parts.reduce((a, p) => a + p.size, 0);
     }
 
+    const etagsOrdered = sortedParts.map((xp) => {
+      const rec = byPart.get(xp.partNumber);
+      return rec?.etag ?? xp.etag;
+    });
+    const etagOut =
+      etagsOrdered.length > 0
+        ? compositeMultipartEtag(etagsOrdered)
+        : '"complete"';
+
+    // Replace any existing object at this key (same as PUT) so retries /
+    // rclone re-syncs do not leave duplicate Drive entries with the same name.
+    try {
+      const existing = await resolveObjectKey(
+        ctx,
+        W,
+        bucketRootId,
+        bucket,
+        session.key,
+      );
+      if (existing.kind === "file" || existing.kind === "folder") {
+        await ctx.drime.deleteEntriesForever([existing.entry.id]);
+        ctx.listCache.invalidate(existing.parentFolderId);
+      }
+    } catch (e) {
+      ctx.logger.error(
+        { err: e instanceof Error ? e.message : String(e) },
+        "multipart complete: delete existing object failed",
+      );
+      return xmlErr(
+        500,
+        "InternalError",
+        e instanceof Error ? e.message : "Delete existing object failed.",
+      );
+    }
+
     const entryPayload: Record<string, unknown> = {
       clientMime: "application/octet-stream",
       clientName: filename,
@@ -436,8 +483,9 @@ export async function handleMultipartRequest(
       parentId: session.parentId,
     };
 
+    let entryRaw: unknown;
     try {
-      await ctx.drime.s3CreateEntry(entryPayload);
+      entryRaw = await ctx.drime.s3CreateEntry(entryPayload);
     } catch (e) {
       ctx.logger.error(
         { err: e instanceof Error ? e.message : String(e) },
@@ -450,18 +498,24 @@ export async function handleMultipartRequest(
       );
     }
 
+    // Persist composite multipart ETag so subsequent HEAD/GET/list match
+    // CompleteMultipartUploadResult. rclone HEADs after complete and fails
+    // with "multipart upload corrupted: Etag differ" without this.
+    const fileEntryId = parseFileEntryId(entryRaw);
+    if (fileEntryId !== undefined) {
+      try {
+        await ctx.drime.updateFileEntryDescription(
+          fileEntryId,
+          buildObjectDescription(etagOut.replace(/^"|"$/g, ""), null),
+        );
+      } catch {
+        /* optional Drime feature */
+      }
+    }
+
     ctx.multipartStore.delete(uploadIdParam);
     ctx.listCache.invalidate(session.parentId);
     ctx.folderCache.evictPrefix(normalizePathKey(`${bucket}/${session.key}`));
-
-    const etagsOrdered = sortedParts.map((xp) => {
-      const rec = byPart.get(xp.partNumber);
-      return rec?.etag ?? xp.etag;
-    });
-    const etagOut =
-      etagsOrdered.length > 0
-        ? compositeMultipartEtag(etagsOrdered)
-        : '"complete"';
 
     const xml = completeMultipartUploadXml({
       location: `${url.origin}/${bucket}/${session.key
@@ -474,7 +528,7 @@ export async function handleMultipartRequest(
     });
     return new Response(xml, {
       status: 200,
-      headers: { "Content-Type": "application/xml" },
+      headers: { "Content-Type": "application/xml", ETag: etagOut },
     });
   }
 

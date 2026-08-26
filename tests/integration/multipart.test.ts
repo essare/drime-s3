@@ -128,6 +128,31 @@ describe("S3 multipart upload", () => {
       expect(complete.status).toBe(200);
       const completeXml = await complete.text();
       expect(completeXml).toContain("CompleteMultipartUploadResult");
+      const completeDoc = xmlParser.parse(completeXml) as Record<
+        string,
+        unknown
+      >;
+      const completeRoot =
+        completeDoc.CompleteMultipartUploadResult ??
+        completeDoc.completeMultipartUploadResult;
+      expect(completeRoot && typeof completeRoot === "object").toBe(true);
+      const completeEtag = String(
+        (completeRoot as Record<string, unknown>).ETag ?? "",
+      ).replace(/^"+|"+$/g, "");
+      // AWS multipart ETag: md5-of-part-md5s + "-" + partCount
+      expect(completeEtag).toMatch(/^[a-f0-9]{32}-1$/);
+
+      // rclone (and AWS SDK) HEAD after Complete and require the same ETag.
+      const head = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/${objectKey}`, {
+          method: "HEAD",
+          headers: h,
+        }),
+      );
+      expect(head.status).toBe(200);
+      const headEtag = head.headers.get("etag")?.replace(/^"+|"+$/g, "") ?? "";
+      expect(headEtag).toBe(completeEtag);
 
       const get = await dispatch(
         ctx,
@@ -139,6 +164,9 @@ describe("S3 multipart upload", () => {
       expect(get.status).toBe(200);
       const buf = Buffer.from(await get.arrayBuffer());
       expect(buf.equals(partBody)).toBe(true);
+      expect(get.headers.get("etag")?.replace(/^"+|"+$/g, "")).toBe(
+        completeEtag,
+      );
     } finally {
       mock.stop();
     }
