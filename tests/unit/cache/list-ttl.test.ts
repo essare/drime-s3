@@ -393,6 +393,32 @@ describe("ListTtlCache replacement overlay", () => {
     expect(cache.replacementOverlaySize).toBe(5000);
   });
 
+  test("warns once when the overlay bound evicts a live overlay", () => {
+    const evicted: unknown[] = [];
+    const cache = new ListTtlCache(
+      () => {},
+      (event) => evicted.push(event),
+    );
+
+    for (let folderId = 0; folderId <= 5000; folderId += 1) {
+      cache.replaceEntry(
+        folderId,
+        folderId,
+        folderEntry(folderId + 10_000, `entry-${folderId}`),
+      );
+    }
+
+    expect(evicted).toEqual([
+      {
+        folderId: 0,
+        name: "entry-0",
+        oldEntryId: 0,
+        newEntryId: 10_000,
+      },
+    ]);
+    expect(cache.replacementOverlaySize).toBe(5000);
+  });
+
   test("bounds replacement overlays within one folder", async () => {
     const cache = new ListTtlCache();
 

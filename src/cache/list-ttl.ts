@@ -42,6 +42,9 @@ export class ListTtlCache {
     private readonly onReplacementExpired: (
       event: ReplacementOverlayExpired,
     ) => void = () => {},
+    private readonly onReplacementEvicted: (
+      event: ReplacementOverlayExpired,
+    ) => void = () => {},
   ) {}
 
   /** Drop cached listing for this folder (call after writes under that folder). */
@@ -127,7 +130,20 @@ export class ListTtlCache {
     while (this.replacementOrder.size > MAX_CACHED_KEYS) {
       const first = this.replacementOrder.keys().next().value;
       if (first === undefined) break;
+      const location = this.replacementOrder.get(first);
+      const evicted = location
+        ? {
+            folderId:
+              location.folderKey === "__root__"
+                ? null
+                : Number(location.folderKey),
+            name: location.name,
+            oldEntryId: first.oldEntryId,
+            newEntryId: first.newEntry.id,
+          }
+        : undefined;
       this.deleteReplacement(first);
+      if (evicted) this.onReplacementEvicted(evicted);
     }
   }
 
