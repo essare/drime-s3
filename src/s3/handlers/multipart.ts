@@ -12,6 +12,7 @@ import {
 } from "../../multipart/session-store";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
+import { safeHandlerErrorFields } from "../handler-error-fields";
 import { isValidBucketName } from "../naming";
 import {
   commitObjectReplacement,
@@ -37,20 +38,6 @@ function xmlErr(status: number, code: string, message: string): Response {
     status,
     headers: { "Content-Type": "application/xml" },
   });
-}
-
-/** Stable type + Drime status only. No message, stack, body, cause, tags, or URLs. */
-function safeHandlerErrorFields(error: unknown): {
-  errType: string;
-  drimeStatus?: number;
-} {
-  if (error instanceof DrimeApiError) {
-    return { errType: error.name, drimeStatus: error.status };
-  }
-  if (error instanceof Error && error.name.length > 0) {
-    return { errType: error.name };
-  }
-  return { errType: typeof error };
 }
 
 function readOptionalMultipartDeclaredSize(req: Request): number {
@@ -231,14 +218,10 @@ export async function handleMultipartRequest(
       });
     } catch (e) {
       ctx.logger.error(
-        { err: e instanceof Error ? e.message : String(e) },
+        { ...safeHandlerErrorFields(e), bucket, key },
         "multipart init failed",
       );
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? e.message : "Multipart init failed.",
-      );
+      return xmlErr(500, "InternalError", "Multipart init failed.");
     }
   }
 
@@ -289,6 +272,26 @@ export async function handleMultipartRequest(
       );
     }
 
+    let rawBytes: Uint8Array;
+    try {
+      rawBytes = new Uint8Array(await req.arrayBuffer());
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), partNumber: partNum },
+        "multipart upload part failed",
+      );
+      return xmlErr(500, "InternalError", "Part upload failed.");
+    }
+    if (rawBytes.byteLength !== clNum) {
+      return xmlErr(
+        400,
+        "InvalidRequest",
+        "Content-Length does not match the request body.",
+      );
+    }
+    const bodyBuf = Buffer.alloc(rawBytes.byteLength);
+    bodyBuf.set(rawBytes);
+
     const signUrls = await ctx.drime.s3BatchSignPartUrls({
       key: session.drimeKey,
       uploadId: session.drimeUid,
@@ -303,13 +306,6 @@ export async function handleMultipartRequest(
         "No signed URL returned for part upload.",
       );
     }
-
-    const rawBytes = new Uint8Array(await req.arrayBuffer());
-    if (clNum > 0 && rawBytes.byteLength === 0) {
-      return xmlErr(400, "InvalidRequest", "Missing request body.");
-    }
-    const bodyBuf = Buffer.alloc(rawBytes.byteLength);
-    bodyBuf.set(rawBytes);
 
     try {
       const upstream = await uploadPartWithRetry(
@@ -437,13 +433,22 @@ export async function handleMultipartRequest(
         ? compositeMultipartEtag(etagsOrdered)
         : '"complete"';
 
-    const existing = await resolveObjectKey(
-      ctx,
-      W,
-      bucketRootId,
-      bucket,
-      session.key,
-    );
+    let existing: Awaited<ReturnType<typeof resolveObjectKey>>;
+    try {
+      existing = await resolveObjectKey(
+        ctx,
+        W,
+        bucketRootId,
+        bucket,
+        session.key,
+      );
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), bucket, key: session.key },
+        "multipart complete resolve failed",
+      );
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
+    }
 
     const entryPayload: Record<string, unknown> = {
       clientMime: "application/octet-stream",

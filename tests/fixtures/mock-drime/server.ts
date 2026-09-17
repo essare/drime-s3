@@ -42,7 +42,7 @@ export type StartMockDrimeOptions = {
   workspaceId?: number;
   /** Folder names created at workspace root (valid Drime `type: "folder"` rows). */
   seedRootFolders?: string[];
-  /** Remaining forced 500s for POST `/uploads` and POST `/s3/entries`. */
+  /** Remaining forced 500s for POST `/uploads`, `/s3/multipart/create`, and `/s3/entries`. */
   uploadFailureCount?: number;
   /** Remaining forced 500s for PUT `/file-entries/:id`. */
   metadataFailureCount?: number;
@@ -66,6 +66,8 @@ export type StartMockDrimeOptions = {
    * coordinator confirmation stays unresolved without DrimeClient 5xx retries.
    */
   emptyListingCount?: number;
+  /** Remaining forced 500s for GET `/drive/file-entries`. */
+  listFailureCount?: number;
 };
 
 function wrapCreatedEntry(
@@ -224,6 +226,8 @@ export type MockDrimeServer = {
   deleteInvalidIdsCount: number;
   /** Remaining folder lists that return an empty 200 page. */
   emptyListingCount: number;
+  /** Remaining forced 500s for folder lists. */
+  listFailureCount: number;
   /** Every `PUT /mock-multipart-put`, including failed statuses. */
   partPutReceipts: MockPartPutReceipt[];
   /** `POST /s3/multipart/complete` invocations, including 4xx. */
@@ -277,6 +281,7 @@ export async function startMockDrime(
     partPutStatuses: [...(options.partPutStatuses ?? [])],
     deleteInvalidIdsCount: options.deleteInvalidIdsCount ?? 0,
     emptyListingCount: options.emptyListingCount ?? 0,
+    listFailureCount: options.listFailureCount ?? 0,
     partPutReceipts: [],
     multipartCompleteCount: 0,
     snapshotFileEntries() {
@@ -301,7 +306,11 @@ export async function startMockDrime(
   };
 
   const takeFault = (
-    key: "uploadFailureCount" | "metadataFailureCount" | "deleteFailureCount",
+    key:
+      | "uploadFailureCount"
+      | "metadataFailureCount"
+      | "deleteFailureCount"
+      | "listFailureCount",
   ): boolean => {
     if (handle[key] > 0) {
       handle[key] -= 1;
@@ -359,6 +368,9 @@ export async function startMockDrime(
       }
 
       if (req.method === "GET" && path === "/drive/file-entries") {
+        if (takeFault("listFailureCount")) {
+          return forcedFailureResponse(handle.faultBody);
+        }
         if (handle.emptyListingCount > 0) {
           handle.emptyListingCount -= 1;
           return json({ data: [], last_page: 1 });
@@ -539,6 +551,9 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/s3/multipart/create") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           await req.arrayBuffer().catch(() => undefined);
           const uid = `mu-${nextId++}`;
           const dk = `dk-${uid}`;

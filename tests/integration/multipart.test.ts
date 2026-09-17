@@ -60,6 +60,14 @@ function capturingLogger(): { logger: pino.Logger; serialized: () => string } {
   };
 }
 
+function assertOmitsPlanted(xml: string, logs: string): void {
+  expect(xml).not.toContain(PLANTED_SECRET);
+  expect(xml).not.toContain("forced failure");
+  expect(logs).not.toContain(PLANTED_SECRET);
+  expect(logs).not.toContain("forced failure");
+  expect(logs).not.toContain("truncated:");
+}
+
 async function createCtx(
   apiBaseUrl: string,
   logger: pino.Logger = pino({ level: "silent" }),
@@ -620,13 +628,23 @@ describe("S3 multipart upload", () => {
       "backup.bin",
     );
     try {
-      mock.deleteFailureCount = 1;
-      mock.emptyListingCount = 5;
       const { uploadId, etag1, etag2 } = await uploadTwoParts(
         ctx,
         "mp-unresolved-bucket",
         "backup.bin",
       );
+      const ws = ctx.gatewayWorkspaceId ?? 1;
+      const roots = await ctx.drime.listFolder(null, ws);
+      const bucketFolder = roots.find(
+        (e) => e.is_folder && e.name === "mp-unresolved-bucket",
+      );
+      expect(bucketFolder).toBeDefined();
+      const parentId = bucketFolder?.id ?? 0;
+      await ctx.listCache.getOrFetch(parentId, () =>
+        ctx.drime.listFolder(parentId, ws),
+      );
+      mock.deleteFailureCount = 1;
+      mock.emptyListingCount = 5;
       const complete = await completeMultipart(
         ctx,
         "mp-unresolved-bucket",
@@ -701,6 +719,187 @@ describe("S3 multipart upload", () => {
       expect(got.headers.get("etag")?.replace(/^"+|"+$/g, "")).toBe(
         completeEtag,
       );
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("multipart init omits planted Drime body from S3 XML and logs", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createCtx(mock.baseUrl, capture.logger);
+      await putBucket(ctx, "mp-init-secret-bucket");
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.uploadFailureCount = 1;
+      const init = await dispatch(
+        ctx,
+        new Request(`${BASE}/mp-init-secret-bucket/secret.bin?uploads=`, {
+          method: "POST",
+          headers: H,
+        }),
+      );
+      expect(init.status).toBe(500);
+      const xml = await init.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Multipart init failed.");
+      assertOmitsPlanted(xml, capture.serialized());
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("UploadPart aborted stream returns InternalError XML and omits the cause", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createCtx(mock.baseUrl, capture.logger);
+      await putBucket(ctx, "mp-abort-bucket");
+      const uploadId = await initiateMultipart(
+        ctx,
+        "mp-abort-bucket",
+        "abort.bin",
+      );
+      const partUrl = `${BASE}/mp-abort-bucket/abort.bin?partNumber=1&uploadId=${encodeURIComponent(uploadId)}`;
+      const req = new Request(partUrl, {
+        method: "PUT",
+        headers: {
+          ...H,
+          "Content-Type": "application/octet-stream",
+          "Content-Length": "16",
+        },
+        body: PART_A,
+      });
+      Object.defineProperty(req, "arrayBuffer", {
+        configurable: true,
+        value: async () => {
+          throw new Error(`truncated: ${PLANTED_SECRET}`);
+        },
+      });
+      const part = await dispatch(ctx, req);
+      expect(part.status).toBe(500);
+      const xml = await part.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Part upload failed.");
+      assertOmitsPlanted(xml, capture.serialized());
+      expect(mock.partPutReceipts).toEqual([]);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("UploadPart rejects a body shorter than Content-Length without calling upstream", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      await putBucket(ctx, "mp-short-cl-bucket");
+      const uploadId = await initiateMultipart(
+        ctx,
+        "mp-short-cl-bucket",
+        "short.bin",
+      );
+      const part = await dispatch(
+        ctx,
+        new Request(
+          `${BASE}/mp-short-cl-bucket/short.bin?partNumber=1&uploadId=${encodeURIComponent(uploadId)}`,
+          {
+            method: "PUT",
+            headers: {
+              ...H,
+              "Content-Type": "application/octet-stream",
+              "Content-Length": "16",
+            },
+            body: new Uint8Array(8),
+          },
+        ),
+      );
+      expect(part.status).toBe(400);
+      const xml = await part.text();
+      expect(xml).toContain("InvalidRequest");
+      expect(xml).toContain("Content-Length");
+      expect(mock.partPutReceipts).toEqual([]);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("UploadPart rejects a body longer than Content-Length without calling upstream", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      await putBucket(ctx, "mp-long-cl-bucket");
+      const uploadId = await initiateMultipart(
+        ctx,
+        "mp-long-cl-bucket",
+        "long.bin",
+      );
+      const part = await dispatch(
+        ctx,
+        new Request(
+          `${BASE}/mp-long-cl-bucket/long.bin?partNumber=1&uploadId=${encodeURIComponent(uploadId)}`,
+          {
+            method: "PUT",
+            headers: {
+              ...H,
+              "Content-Type": "application/octet-stream",
+              "Content-Length": "8",
+            },
+            body: new Uint8Array(16),
+          },
+        ),
+      );
+      expect(part.status).toBe(400);
+      const xml = await part.text();
+      expect(xml).toContain("InvalidRequest");
+      expect(xml).toContain("Content-Length");
+      expect(mock.partPutReceipts).toEqual([]);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("Complete resolveObjectKey failure omits planted Drime body from S3 XML and logs", async () => {
+    const { mock, ctx, capture } = await seedBucketWithOldObject(
+      {},
+      "mp-resolve-secret-bucket",
+      "backup.bin",
+    );
+    try {
+      const { uploadId, etag1, etag2 } = await uploadTwoParts(
+        ctx,
+        "mp-resolve-secret-bucket",
+        "backup.bin",
+      );
+      const ws = ctx.gatewayWorkspaceId ?? 1;
+      const roots = await ctx.drime.listFolder(null, ws);
+      const bucketFolder = roots.find(
+        (e) => e.is_folder && e.name === "mp-resolve-secret-bucket",
+      );
+      expect(bucketFolder).toBeDefined();
+      ctx.listCache.invalidate(bucketFolder?.id ?? 0);
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.listFailureCount = 1;
+      const complete = await completeMultipart(
+        ctx,
+        "mp-resolve-secret-bucket",
+        "backup.bin",
+        uploadId,
+        [
+          { partNumber: 1, etag: etag1 },
+          { partNumber: 2, etag: etag2 },
+        ],
+      );
+      expect(complete.status).toBe(500);
+      const xml = await complete.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Multipart complete failed.");
+      assertOmitsPlanted(xml, capture.serialized());
     } finally {
       mock.stop();
     }

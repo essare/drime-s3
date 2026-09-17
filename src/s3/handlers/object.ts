@@ -8,7 +8,6 @@ import {
   createAwsChunkedPayloadTransform,
 } from "../../auth/chunked-decoder";
 import { normalizePathKey } from "../../cache/folder-paths";
-import { DrimeApiError } from "../../drime/client";
 import {
   getMultipartPutThresholdBytes,
   uploadFileViaInternalMultipart,
@@ -16,6 +15,7 @@ import {
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
+import { safeHandlerErrorFields } from "../handler-error-fields";
 import { isValidBucketName } from "../naming";
 import {
   commitObjectReplacement,
@@ -56,20 +56,6 @@ function replacementStageError(
 ): Response {
   ctx.logger.error({ ...fields, stage: error.stage }, logMessage);
   return xmlErr(500, "InternalError", clientMessage);
-}
-
-/** Stable type + Drime status only. No message, stack, body, cause, tags, or URLs. */
-function safeHandlerErrorFields(error: unknown): {
-  errType: string;
-  drimeStatus?: number;
-} {
-  if (error instanceof DrimeApiError) {
-    return { errType: error.name, drimeStatus: error.status };
-  }
-  if (error instanceof Error && error.name.length > 0) {
-    return { errType: error.name };
-  }
-  return { errType: typeof error };
 }
 
 function formatHttpDate(updatedAt: string | null): string {
