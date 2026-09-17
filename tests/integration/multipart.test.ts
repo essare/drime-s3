@@ -861,6 +861,48 @@ describe("S3 multipart upload", () => {
     }
   });
 
+  test("UploadPart sign-url failure omits planted Drime body and does not PUT the part", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createCtx(mock.baseUrl, capture.logger);
+      await putBucket(ctx, "mp-sign-secret-bucket");
+      const uploadId = await initiateMultipart(
+        ctx,
+        "mp-sign-secret-bucket",
+        "secret.bin",
+      );
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.signPartUrlFailureCount = 1;
+      const part = await dispatch(
+        ctx,
+        new Request(
+          `${BASE}/mp-sign-secret-bucket/secret.bin?partNumber=1&uploadId=${encodeURIComponent(uploadId)}`,
+          {
+            method: "PUT",
+            headers: {
+              ...H,
+              "Content-Type": "application/octet-stream",
+              "Content-Length": String(PART_A.length),
+            },
+            body: new Uint8Array(PART_A),
+          },
+        ),
+      );
+      expect(part.status).toBe(500);
+      const xml = await part.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Part upload failed.");
+      assertOmitsPlanted(xml, capture.serialized());
+      expect(mock.partPutReceipts).toEqual([]);
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("Complete resolveObjectKey failure omits planted Drime body from S3 XML and logs", async () => {
     const { mock, ctx, capture } = await seedBucketWithOldObject(
       {},

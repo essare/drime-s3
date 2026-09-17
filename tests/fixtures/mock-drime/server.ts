@@ -68,6 +68,8 @@ export type StartMockDrimeOptions = {
   emptyListingCount?: number;
   /** Remaining forced 500s for GET `/drive/file-entries`. */
   listFailureCount?: number;
+  /** Remaining forced 500s for POST `/s3/multipart/batch-sign-part-urls`. */
+  signPartUrlFailureCount?: number;
 };
 
 function wrapCreatedEntry(
@@ -228,6 +230,8 @@ export type MockDrimeServer = {
   emptyListingCount: number;
   /** Remaining forced 500s for folder lists. */
   listFailureCount: number;
+  /** Remaining forced 500s for batch-sign-part-urls. */
+  signPartUrlFailureCount: number;
   /** Every `PUT /mock-multipart-put`, including failed statuses. */
   partPutReceipts: MockPartPutReceipt[];
   /** `POST /s3/multipart/complete` invocations, including 4xx. */
@@ -282,6 +286,7 @@ export async function startMockDrime(
     deleteInvalidIdsCount: options.deleteInvalidIdsCount ?? 0,
     emptyListingCount: options.emptyListingCount ?? 0,
     listFailureCount: options.listFailureCount ?? 0,
+    signPartUrlFailureCount: options.signPartUrlFailureCount ?? 0,
     partPutReceipts: [],
     multipartCompleteCount: 0,
     snapshotFileEntries() {
@@ -310,7 +315,8 @@ export async function startMockDrime(
       | "uploadFailureCount"
       | "metadataFailureCount"
       | "deleteFailureCount"
-      | "listFailureCount",
+      | "listFailureCount"
+      | "signPartUrlFailureCount",
   ): boolean => {
     if (handle[key] > 0) {
       handle[key] -= 1;
@@ -567,6 +573,9 @@ export async function startMockDrime(
         path === "/s3/multipart/batch-sign-part-urls"
       ) {
         return (async () => {
+          if (takeFault("signPartUrlFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           const body = (await req.json()) as {
             uploadId?: string;
             partNumbers?: number[];

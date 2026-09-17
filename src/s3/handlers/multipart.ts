@@ -292,13 +292,22 @@ export async function handleMultipartRequest(
     const bodyBuf = Buffer.alloc(rawBytes.byteLength);
     bodyBuf.set(rawBytes);
 
-    const signUrls = await ctx.drime.s3BatchSignPartUrls({
-      key: session.drimeKey,
-      uploadId: session.drimeUid,
-      partNumbers: [partNum],
-    });
-    const signed =
-      signUrls.find((u) => u.partNumber === partNum)?.url ?? signUrls[0]?.url;
+    let signed: string | undefined;
+    try {
+      const signUrls = await ctx.drime.s3BatchSignPartUrls({
+        key: session.drimeKey,
+        uploadId: session.drimeUid,
+        partNumbers: [partNum],
+      });
+      signed =
+        signUrls.find((u) => u.partNumber === partNum)?.url ?? signUrls[0]?.url;
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), partNumber: partNum },
+        "multipart upload part failed",
+      );
+      return xmlErr(500, "InternalError", "Part upload failed.");
+    }
     if (!signed) {
       return xmlErr(
         500,
