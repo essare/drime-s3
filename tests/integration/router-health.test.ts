@@ -67,6 +67,7 @@ describe("S3 router", () => {
       expect(typeof j.version).toBe("string");
       expect(typeof j.folderPathCache).toBe("number");
       expect(typeof j.listTtlCache).toBe("number");
+      expect(typeof j.replacementOverlays).toBe("number");
       expect(typeof j.multipartSessions).toBe("number");
       expect(j.webUi).toBeDefined();
       const w = j.webUi as { passwordSet: boolean; activeSessions: number };

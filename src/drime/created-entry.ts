@@ -1,4 +1,4 @@
-import { fromFileEntryJson, type FileEntry } from "./types";
+import { type FileEntry, fromFileEntryJson } from "./types";
 
 export type CreatedEntryFallback = {
   name: string;
@@ -15,8 +15,7 @@ export class CreatedEntryError extends Error {
 function unwrap(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object") return null;
   const root = raw as Record<string, unknown>;
-  const nested =
-    root.fileEntry ?? root.file ?? root.entry ?? root.data ?? root;
+  const nested = root.fileEntry ?? root.file ?? root.entry ?? root.data ?? root;
   return nested && typeof nested === "object"
     ? (nested as Record<string, unknown>)
     : null;
@@ -27,7 +26,8 @@ export function parseCreatedFileEntry(
   fallback: CreatedEntryFallback,
 ): FileEntry {
   const candidate = unwrap(raw);
-  if (!candidate) throw new CreatedEntryError("Created entry is not an object.");
+  if (!candidate)
+    throw new CreatedEntryError("Created entry is not an object.");
   const parsedId =
     typeof candidate.id === "string" && /^\d+$/.test(candidate.id)
       ? Number(candidate.id)
