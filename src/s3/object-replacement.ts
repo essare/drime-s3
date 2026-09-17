@@ -15,10 +15,10 @@ const MAX_LOGGED_ERROR_CHARS = 200;
 /** Plain MD5, or the AWS composite `md5-of-md5s` plus a positive part count. */
 const PUBLIC_ETAG_PATTERN = /^[a-f0-9]{32}(-[1-9]\d*)?$/;
 
+/** @internal Test-only confirmation poll seam. */
 export type StaleDeleteConfirmOptions = {
   /**
-   * @internal Test seam for the confirmation poll schedule. Defaults to real
-   * timers so production keeps the exact
+   * @internal Defaults to real timers so production keeps the exact
    * {@link STALE_DELETE_CONFIRM_DELAYS_MS} waits.
    */
   sleep?: (ms: number) => Promise<void>;

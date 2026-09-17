@@ -27,10 +27,13 @@ unrecognized `/s3/entries` response skips the update, and errors from
 
 - A successful write is immediately readable through HEAD, GET, and list with
   the ETag returned to the S3 client.
-- A failed overwrite preserves the previously committed object.
+- A failed overwrite never deletes both versions; the previously committed
+  object is preserved whenever it is known to still exist.
 - Transient part-upload failures are retried without restarting the whole
   object.
-- Replacement retries are idempotent and do not leave visible duplicate keys.
+- Successful replacement retries are idempotent and do not leave visible
+  duplicate keys. Unresolvable old-entry deletions keep both versions rather
+  than risk deleting the only remaining copy.
 - Ordinary PUT and client multipart ETags follow their distinct S3 semantics.
 - Failures identify the stage and relevant entry IDs without logging secrets or
   signed URLs.
@@ -219,11 +222,14 @@ flowchart TD
 - Immediate HEAD and GET after client multipart completion return the exact
   completion ETag while the mock Drive listing remains stale.
 - Metadata failure preserves the old object and returns an S3 error.
-- Old-entry deletion failure removes the candidate and preserves the old
-  object.
-- Confirmed already-absent old ID makes retry succeed.
+- Old-entry deletion failure whose listing still shows the old ID removes the
+  candidate and preserves the old object.
+- Unresolvable deletion confirmation keeps the candidate, publishes no
+  success, and returns an error.
+- Confirmed already-absent old ID with the candidate still listed makes retry
+  succeed.
 - A 422 for an ID still present does not get misclassified as success.
-- Repeated overwrite retries leave one visible object.
+- Successful repeated overwrite retries leave one visible object.
 - Part 502 followed by success completes without restarting the object.
 - Concurrent HEAD during replacement sees either the complete old object or
   complete new object, never a missing key.
