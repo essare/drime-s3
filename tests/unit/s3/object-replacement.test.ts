@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import pino from "pino";
 import { DrimeApiError } from "../../../src/drime/client";
 import type { FileEntry } from "../../../src/drime/types";
 import {
@@ -13,6 +14,7 @@ const PARENT_ID = 41;
 const WORKSPACE_ID = 3;
 const OLD_ID = 12;
 const CANDIDATE_ID = 77;
+const SECRET = "super-secret-token";
 
 /** Exact production response body for a stale `POST /file-entries/delete`. */
 const INVALID_IDS_BODY = JSON.stringify({
@@ -34,6 +36,9 @@ const fileEntry = (id: number, name: string): FileEntry => ({
   url: null,
 });
 
+const oldRow = () => fileEntry(OLD_ID, "backup.bin");
+const candidateRow = () => fileEntry(CANDIDATE_ID, "backup.bin");
+
 type LogRecord = {
   level: "info" | "warn" | "error";
   msg: string;
@@ -43,7 +48,8 @@ type LogRecord = {
 type FakeDrime = {
   updateDescription?: (id: number, description: string) => Promise<void>;
   deleteEntries?: (ids: number[]) => Promise<void>;
-  listFolder?: (parentId: number | null, workspaceId: number) => FileEntry[];
+  /** One entry per confirmation poll; throwing simulates a failed listing. */
+  listFolder?: (attempt: number) => FileEntry[];
 };
 
 function createFakeContext(fake: FakeDrime = {}) {
@@ -56,6 +62,7 @@ function createFakeContext(fake: FakeDrime = {}) {
     oldEntryId: number | undefined;
     newEntry: FileEntry;
   }[] = [];
+  let listAttempts = 0;
 
   const log = (level: LogRecord["level"]) => (fields: unknown, msg: string) => {
     logs.push({ level, msg, fields: fields as Record<string, unknown> });
@@ -75,7 +82,8 @@ function createFakeContext(fake: FakeDrime = {}) {
       },
       listFolder: async (parentId: number | null, workspaceId: number) => {
         calls.push(`list:${parentId}:${workspaceId}`);
-        return fake.listFolder?.(parentId, workspaceId) ?? [];
+        listAttempts += 1;
+        return fake.listFolder?.(listAttempts) ?? [];
       },
     },
     listCache: {
@@ -88,6 +96,10 @@ function createFakeContext(fake: FakeDrime = {}) {
           `replaceEntry:${folderId}:${oldEntryId ?? "none"}:${newEntry.id}`,
         );
         replacements.push({ folderId, oldEntryId, newEntry });
+      },
+      getOrFetch: async () => {
+        calls.push("listCacheFetch");
+        return [];
       },
       invalidate: (folderId: number | null) => {
         calls.push(`invalidate:${folderId}`);
@@ -111,11 +123,12 @@ function createFakeContext(fake: FakeDrime = {}) {
 }
 
 function baseOpts(
+  sleep: (ms: number) => Promise<void>,
   over: Partial<CommitObjectReplacementOptions> = {},
 ): CommitObjectReplacementOptions {
   return {
     rawCandidate: { fileEntry: { id: CANDIDATE_ID, name: "backup.bin" } },
-    oldEntry: fileEntry(OLD_ID, "backup.bin"),
+    oldEntry: oldRow(),
     parentId: PARENT_ID,
     workspaceId: WORKSPACE_ID,
     bucket: "production",
@@ -125,6 +138,7 @@ function baseOpts(
     mime: "application/octet-stream",
     publicEtag: `"${MD5}"`,
     tagging: null,
+    staleDelete: { sleep },
     ...over,
   };
 }
@@ -146,11 +160,29 @@ async function expectStage(
   throw new Error(`Expected ObjectReplacementError with stage ${stage}.`);
 }
 
+/** Serialize exactly as a handler would when logging a coordinator failure. */
+function serializeWithPino(error: unknown): string {
+  const lines: string[] = [];
+  const logger = pino(
+    { level: "error" },
+    {
+      write: (line: string) => {
+        lines.push(line);
+      },
+    },
+  );
+  logger.error({ err: error }, "replacement_failed");
+  return lines.join("");
+}
+
 describe("commitObjectReplacement", () => {
   test("persists the ETag before deleting the old entry, then publishes", async () => {
     const fake = createFakeContext();
 
-    const committed = await commitObjectReplacement(fake.ctx, baseOpts());
+    const committed = await commitObjectReplacement(
+      fake.ctx,
+      baseOpts(fake.sleep),
+    );
 
     expect(fake.calls).toEqual([
       `update:${CANDIDATE_ID}`,
@@ -180,17 +212,57 @@ describe("commitObjectReplacement", () => {
 
     const committed = await commitObjectReplacement(
       fake.ctx,
-      baseOpts({ tagging: "team=ops&tier=cold" }),
+      baseOpts(fake.sleep, { tagging: "team=ops&tier=cold" }),
     );
 
     expect(fake.descriptions).toEqual([`md5:${MD5}\ns3tag:team=ops&tier=cold`]);
     expect(committed.description).toBe(`md5:${MD5}\ns3tag:team=ops&tier=cold`);
   });
 
+  test("accepts a composite multipart ETag and normalizes hex case", async () => {
+    const fake = createFakeContext();
+
+    const committed = await commitObjectReplacement(
+      fake.ctx,
+      baseOpts(fake.sleep, { publicEtag: `"${MD5.toUpperCase()}-13"` }),
+    );
+
+    expect(fake.descriptions).toEqual([`md5:${MD5}-13`]);
+    expect(committed.description).toBe(`md5:${MD5}-13`);
+  });
+
+  test("rejects a public ETag that is not an MD5 or composite ETag", async () => {
+    for (const publicEtag of [
+      '"not-an-etag"',
+      `"${MD5}-0"`,
+      `"${MD5}extra"`,
+      '""',
+    ]) {
+      const fake = createFakeContext();
+
+      await expectStage(
+        commitObjectReplacement(fake.ctx, baseOpts(fake.sleep, { publicEtag })),
+        "etag_persist",
+      );
+
+      /** Nothing is persisted, the old entry is untouched, the junk candidate goes. */
+      expect(fake.calls).toEqual([`delete:${CANDIDATE_ID}`]);
+      expect(fake.descriptions).toEqual([]);
+      expect(fake.replacements).toEqual([]);
+      expect(messages(fake.logs)).toEqual([
+        "candidate_registered",
+        "etag_persist_failed",
+      ]);
+    }
+  });
+
   test("skips deletion when there is no old entry", async () => {
     const fake = createFakeContext();
 
-    await commitObjectReplacement(fake.ctx, baseOpts({ oldEntry: undefined }));
+    await commitObjectReplacement(
+      fake.ctx,
+      baseOpts(fake.sleep, { oldEntry: undefined }),
+    );
 
     expect(fake.calls).toEqual([
       `update:${CANDIDATE_ID}`,
@@ -200,19 +272,18 @@ describe("commitObjectReplacement", () => {
   });
 
   test("metadata failure deletes only the candidate and keeps the old entry", async () => {
-    const persistError = new Error("metadata rejected");
     const fake = createFakeContext({
       updateDescription: async () => {
-        throw persistError;
+        throw new Error("metadata rejected");
       },
     });
 
     const error = await expectStage(
-      commitObjectReplacement(fake.ctx, baseOpts()),
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
       "etag_persist",
     );
 
-    expect(error.cause).toBe(persistError);
+    expect((error.cause as Error).message).toContain("metadata rejected");
     expect(fake.calls).toEqual([
       `update:${CANDIDATE_ID}`,
       `delete:${CANDIDATE_ID}`,
@@ -224,140 +295,256 @@ describe("commitObjectReplacement", () => {
     ]);
   });
 
-  test("old deletion failure rolls back the candidate and does not publish", async () => {
-    const deleteError = new Error("drime unavailable");
+  test("sanitizes metadata-failure causes so Pino cannot serialize the body", async () => {
     const fake = createFakeContext({
-      deleteEntries: async (ids) => {
-        if (ids.includes(OLD_ID)) throw deleteError;
+      updateDescription: async () => {
+        throw new DrimeApiError(
+          500,
+          JSON.stringify({ message: "boom", token: SECRET }),
+        );
       },
     });
 
     const error = await expectStage(
-      commitObjectReplacement(fake.ctx, baseOpts()),
-      "old_delete",
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
+      "etag_persist",
     );
 
-    expect(error.cause).toBe(deleteError);
-    expect(fake.calls).toEqual([
-      `update:${CANDIDATE_ID}`,
-      `delete:${OLD_ID}`,
-      `delete:${CANDIDATE_ID}`,
-    ]);
-    expect(fake.replacements).toEqual([]);
-    expect(messages(fake.logs)).toEqual([
-      "candidate_registered",
-      "old_delete_failed",
-    ]);
+    const cause = error.cause as Error;
+    expect(cause).toBeInstanceOf(Error);
+    expect(cause).not.toBeInstanceOf(DrimeApiError);
+    expect(cause.message).toContain("Drime API error 500");
+    expect(serializeWithPino(error)).not.toContain(SECRET);
+    expect(JSON.stringify(fake.logs)).not.toContain(SECRET);
   });
 
-  test("does not treat every 422 as an idempotent delete", async () => {
+  test("sanitizes delete-failure and rollback causes so Pino cannot serialize the body", async () => {
     const fake = createFakeContext({
       deleteEntries: async (ids) => {
         if (ids.includes(OLD_ID)) {
           throw new DrimeApiError(
-            422,
-            JSON.stringify({ message: "The name field is required." }),
+            503,
+            JSON.stringify({ message: "unavailable", token: SECRET }),
           );
         }
+        throw new DrimeApiError(
+          500,
+          JSON.stringify({ message: "rollback blocked", token: SECRET }),
+        );
       },
+      listFolder: () => [oldRow(), candidateRow()],
     });
 
-    await expectStage(
-      commitObjectReplacement(
-        fake.ctx,
-        baseOpts({ staleDelete: { sleep: fake.sleep } }),
-      ),
-      "old_delete",
+    const error = await expectStage(
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
+      "candidate_rollback",
     );
 
-    expect(fake.calls).toEqual([
-      `update:${CANDIDATE_ID}`,
-      `delete:${OLD_ID}`,
-      `delete:${CANDIDATE_ID}`,
-    ]);
-    expect(fake.sleeps).toEqual([]);
+    const serialized = serializeWithPino(error);
+    expect(serialized).not.toContain(SECRET);
+    expect(serialized).toContain("Drime API error 503");
+    expect(JSON.stringify(fake.logs)).not.toContain(SECRET);
   });
 
-  test("commits when a fresh listing confirms the old entry is already gone", async () => {
+  test("confirms every ambiguous delete through direct listings, never the list cache", async () => {
     const fake = createFakeContext({
       deleteEntries: async (ids) => {
-        if (ids.includes(OLD_ID)) {
-          throw new DrimeApiError(422, INVALID_IDS_BODY);
-        }
+        if (ids.includes(OLD_ID)) throw new Error("socket hang up");
       },
-      listFolder: () => [fileEntry(CANDIDATE_ID, "backup.bin")],
+      listFolder: () => [candidateRow()],
     });
 
-    const committed = await commitObjectReplacement(
-      fake.ctx,
-      baseOpts({ staleDelete: { sleep: fake.sleep } }),
-    );
+    await commitObjectReplacement(fake.ctx, baseOpts(fake.sleep));
 
-    expect(committed.id).toBe(CANDIDATE_ID);
     expect(fake.calls).toEqual([
       `update:${CANDIDATE_ID}`,
       `delete:${OLD_ID}`,
       `list:${PARENT_ID}:${WORKSPACE_ID}`,
       `replaceEntry:${PARENT_ID}:${OLD_ID}:${CANDIDATE_ID}`,
     ]);
-    expect(fake.sleeps).toEqual([]);
-    expect(messages(fake.logs)).toEqual([
-      "candidate_registered",
-      "old_delete_failed",
-      "replacement_committed",
-    ]);
-    const confirmLog = fake.logs[1];
-    expect(confirmLog?.level).toBe("warn");
-    expect(confirmLog?.fields.confirmedAbsent).toBe(true);
+    expect(fake.calls).not.toContain("listCacheFetch");
   });
 
-  test("bounds confirmation polling with the production delay schedule", async () => {
+  test("commits after a 504 whose deletion actually applied", async () => {
+    const fake = createFakeContext({
+      deleteEntries: async (ids) => {
+        if (ids.includes(OLD_ID)) {
+          throw new DrimeApiError(504, "<html>Gateway Timeout</html>");
+        }
+      },
+      /** Stale listing converges: the old row disappears on the third poll. */
+      listFolder: (attempt) =>
+        attempt < 3 ? [oldRow(), candidateRow()] : [candidateRow()],
+    });
+
+    const committed = await commitObjectReplacement(
+      fake.ctx,
+      baseOpts(fake.sleep),
+    );
+
+    expect(committed.id).toBe(CANDIDATE_ID);
+    expect(fake.sleeps).toEqual([250, 500]);
+    expect(fake.calls.at(-1)).toBe(
+      `replaceEntry:${PARENT_ID}:${OLD_ID}:${CANDIDATE_ID}`,
+    );
+    const confirmLog = fake.logs[1];
+    expect(confirmLog?.msg).toBe("old_delete_failed");
+    expect(confirmLog?.level).toBe("warn");
+    expect(confirmLog?.fields.confirmation).toBe("committed");
+  });
+
+  test("commits when the invalid-entry-ids 422 is confirmed by a fresh listing", async () => {
     const fake = createFakeContext({
       deleteEntries: async (ids) => {
         if (ids.includes(OLD_ID)) {
           throw new DrimeApiError(422, INVALID_IDS_BODY);
         }
       },
-      listFolder: () => [fileEntry(OLD_ID, "backup.bin")],
+      listFolder: () => [candidateRow()],
+    });
+
+    const committed = await commitObjectReplacement(
+      fake.ctx,
+      baseOpts(fake.sleep),
+    );
+
+    expect(committed.id).toBe(CANDIDATE_ID);
+    expect(fake.sleeps).toEqual([]);
+    expect(messages(fake.logs)).toEqual([
+      "candidate_registered",
+      "old_delete_failed",
+      "replacement_committed",
+    ]);
+    expect(fake.logs[1]?.fields.invalidEntryIds).toBe(true);
+  });
+
+  test("rolls back the candidate when the old entry is still present", async () => {
+    const fake = createFakeContext({
+      deleteEntries: async (ids) => {
+        if (ids.includes(OLD_ID)) {
+          throw new DrimeApiError(422, INVALID_IDS_BODY);
+        }
+      },
+      listFolder: () => [oldRow(), candidateRow()],
+    });
+
+    const error = await expectStage(
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
+      "old_delete",
+    );
+
+    expect((error.cause as Error).message).toContain("Drime API error 422");
+    const listCalls = fake.calls.filter((c) => c.startsWith("list:"));
+    expect(listCalls).toHaveLength(5);
+    expect(fake.sleeps).toEqual([250, 500, 1000, 2000]);
+    expect(fake.calls.at(-1)).toBe(`delete:${CANDIDATE_ID}`);
+    expect(fake.replacements).toEqual([]);
+    expect(fake.logs.at(-1)?.fields.confirmation).toBe("old_present");
+  });
+
+  test("does not accept a listing that is missing the candidate as success", async () => {
+    const fake = createFakeContext({
+      deleteEntries: async (ids) => {
+        if (ids.includes(OLD_ID)) throw new Error("connection reset");
+      },
+      /** Neither row is visible: nothing about the delete is established. */
+      listFolder: () => [],
+    });
+
+    const error = await expectStage(
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
+      "old_delete",
+    );
+
+    expect(error.message).toContain("could not be confirmed");
+    expect(fake.calls).not.toContain(`delete:${CANDIDATE_ID}`);
+    expect(fake.replacements).toEqual([]);
+    expect(messages(fake.logs)).toEqual([
+      "candidate_registered",
+      "old_delete_failed",
+      "replacement_ambiguous_data_preserved",
+    ]);
+    const preservedLog = fake.logs.at(-1);
+    expect(preservedLog?.level).toBe("error");
+    expect(preservedLog?.fields.candidateRetained).toBe(true);
+    expect(preservedLog?.fields.confirmation).toBe("unknown");
+    expect(preservedLog?.fields.candidateId).toBe(CANDIDATE_ID);
+    expect(preservedLog?.fields.oldEntryId).toBe(OLD_ID);
+  });
+
+  test("preserves the candidate when every confirmation listing fails", async () => {
+    const fake = createFakeContext({
+      deleteEntries: async (ids) => {
+        if (ids.includes(OLD_ID)) throw new Error("connection reset");
+      },
+      listFolder: () => {
+        throw new DrimeApiError(500, `{"token":"${SECRET}"}`);
+      },
     });
 
     await expectStage(
-      commitObjectReplacement(
-        fake.ctx,
-        baseOpts({ staleDelete: { sleep: fake.sleep } }),
-      ),
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
       "old_delete",
     );
 
     const listCalls = fake.calls.filter((c) => c.startsWith("list:"));
     expect(listCalls).toHaveLength(5);
     expect(fake.sleeps).toEqual([250, 500, 1000, 2000]);
-    expect(fake.calls.at(-1)).toBe(`delete:${CANDIDATE_ID}`);
+    expect(fake.calls).not.toContain(`delete:${CANDIDATE_ID}`);
     expect(fake.replacements).toEqual([]);
-    expect(fake.logs.at(-1)?.fields.confirmedAbsent).toBe(false);
+    expect(messages(fake.logs).at(-1)).toBe(
+      "replacement_ambiguous_data_preserved",
+    );
+    expect(String(fake.logs.at(-1)?.fields.confirmErr)).toContain(
+      "Drime API error 500",
+    );
+    expect(JSON.stringify(fake.logs)).not.toContain(SECRET);
+  });
+
+  test("preserves the candidate when the final listing leaves the state unknown", async () => {
+    const fake = createFakeContext({
+      deleteEntries: async (ids) => {
+        if (ids.includes(OLD_ID)) throw new Error("connection reset");
+      },
+      /** Old row seen early, but the decisive final listing never lands. */
+      listFolder: (attempt) => {
+        if (attempt >= 5) throw new Error("listing unavailable");
+        return [oldRow(), candidateRow()];
+      },
+    });
+
+    await expectStage(
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
+      "old_delete",
+    );
+
+    expect(fake.calls).not.toContain(`delete:${CANDIDATE_ID}`);
+    expect(fake.replacements).toEqual([]);
+    expect(messages(fake.logs).at(-1)).toBe(
+      "replacement_ambiguous_data_preserved",
+    );
+    expect(fake.logs.at(-1)?.fields.confirmation).toBe("unknown");
   });
 
   test("rollback failure reports candidate_rollback without masking the cause", async () => {
-    const persistError = new Error("metadata rejected");
-    const rollbackError = new Error("candidate delete rejected");
     const fake = createFakeContext({
       updateDescription: async () => {
-        throw persistError;
+        throw new Error("metadata rejected");
       },
       deleteEntries: async () => {
-        throw rollbackError;
+        throw new Error("candidate delete rejected");
       },
     });
 
     const error = await expectStage(
-      commitObjectReplacement(fake.ctx, baseOpts()),
+      commitObjectReplacement(fake.ctx, baseOpts(fake.sleep)),
       "candidate_rollback",
     );
 
     const cause = error.cause as ObjectReplacementError;
     expect(cause).toBeInstanceOf(ObjectReplacementError);
     expect(cause.stage).toBe("etag_persist");
-    expect(cause.cause).toBe(persistError);
+    expect((cause.cause as Error).message).toContain("metadata rejected");
     expect(messages(fake.logs)).toEqual([
       "candidate_registered",
       "etag_persist_failed",
@@ -379,7 +566,7 @@ describe("commitObjectReplacement", () => {
     const error = await expectStage(
       commitObjectReplacement(
         fake.ctx,
-        baseOpts({ rawCandidate: { status: "ok" } }),
+        baseOpts(fake.sleep, { rawCandidate: { status: "ok" } }),
       ),
       "candidate_parse",
     );
@@ -397,19 +584,17 @@ describe("commitObjectReplacement", () => {
   test("never logs the raw upstream candidate payload", async () => {
     const fake = createFakeContext();
 
-    await expectStage(
+    const error = await expectStage(
       commitObjectReplacement(
         fake.ctx,
-        baseOpts({
-          rawCandidate: {
-            status: "ok",
-            authorization: "Bearer super-secret-token",
-          },
+        baseOpts(fake.sleep, {
+          rawCandidate: { status: "ok", authorization: `Bearer ${SECRET}` },
         }),
       ),
       "candidate_parse",
     );
 
-    expect(JSON.stringify(fake.logs)).not.toContain("super-secret-token");
+    expect(JSON.stringify(fake.logs)).not.toContain(SECRET);
+    expect(serializeWithPino(error)).not.toContain(SECRET);
   });
 });

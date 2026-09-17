@@ -14,6 +14,9 @@
 - Client-initiated S3 multipart exposes `MD5(concatenated part MD5 digests)-partCount`.
 - Create and verify the candidate before deleting the old entry.
 - Never return S3 success before ETag persistence and cache publication complete.
+- Never let a failure path delete both the old entry and its replacement: when
+  an old-entry deletion cannot be resolved into a known state, keep both
+  versions and fail the write (user-approved ambiguous-delete policy).
 - Retry network errors and HTTP 429, 502, 503, and 504 for buffered part PUTs, at most five total attempts.
 - Backoff starts at 250 ms, is capped at 4 seconds, and includes jitter.
 - Other 4xx part responses fail immediately.
@@ -504,11 +507,19 @@ and ordered call recording. Cover:
 - metadata update happens before old deletion;
 - success calls `replaceEntry(parentId, oldId, candidate)`;
 - metadata failure deletes only the candidate and leaves old untouched;
-- old deletion failure deletes the candidate and does not publish;
+- old deletion failure with the old entry still present deletes the candidate
+  and does not publish;
 - candidate rollback failure reports stage `candidate_rollback`;
 - no old entry skips deletion;
 - invalid candidate response returns `candidate_parse`, logs
-  `orphan_candidate`, and never guesses an ID.
+  `orphan_candidate`, and never guesses an ID;
+- a 504/timeout whose deletion actually applied commits once a fresh listing
+  shows the candidate present and the old ID absent;
+- a listing missing the candidate is not accepted as a successful delete;
+- all listings failing, or an inconclusive final listing, keeps the candidate,
+  publishes nothing, and returns `old_delete`;
+- a malformed `publicEtag` is rejected before persistence;
+- thrown errors serialized with Pino never contain an upstream response body.
 
 - [ ] **Step 2: Run the coordinator tests and verify failure**
 
@@ -535,18 +546,32 @@ export function isInvalidEntryIdsError(error: unknown): boolean {
 }
 ```
 
-Do not classify every 422 as idempotent success.
+Do not classify every 422 as idempotent success. This classification is
+**diagnostic only** — it is logged to explain the failure, and never decides
+control flow, because confirmation now runs after *every* delete error.
 
 - [ ] **Step 4: Implement commit, rollback, and 422 confirmation**
 
 Implement the ordered state machine. Strip surrounding quotes from
-`publicEtag`, build the description once, parse the candidate, persist metadata,
-then delete old.
+`publicEtag`, lower-case it, and reject anything that is not 32 hex characters
+or 32 hex characters plus `-<positive part count>`; build the description once,
+parse the candidate, persist metadata, then delete old.
 
-When old deletion throws the exact invalid-entry-IDs error, poll
-`ctx.drime.listFolder(parentId, workspaceId)` up to five times with
-250/500/1000/2000 ms delays. If the old ID disappears, continue as committed.
-If it remains, roll back the candidate and throw `old_delete`.
+**Ambiguous-delete policy (user-approved: preserve data over tidiness).** After
+*any* old-deletion error — the exact invalid-entry-IDs 422, a 5xx, or a
+timeout/network failure — poll `ctx.drime.listFolder(parentId, workspaceId)` up
+to five times with 250/500/1000/2000 ms delays, never `ListTtlCache`. Then:
+
+- candidate ID present **and** old ID absent in any poll ⇒ continue as
+  committed (an absent old ID alone is not sufficient);
+- the **final** poll still shows the old ID ⇒ roll back the candidate and throw
+  `old_delete`; rollback is safe precisely because the old entry is confirmed
+  present;
+- no known state (every listing failed, or the final listing establishes
+  neither outcome) ⇒ **keep the candidate**, publish nothing, throw
+  `old_delete`, and emit a high-severity
+  `replacement_ambiguous_data_preserved` log with safe identifiers only. This
+  may leave a duplicate or orphan, but it can never delete both versions.
 
 On success, set the candidate description to the persisted description and
 call:
@@ -556,14 +581,20 @@ ctx.listCache.replaceEntry(parentId, opts.oldEntry?.id, candidate);
 ```
 
 Emit structured messages `candidate_registered`, `etag_persist_failed`,
-`old_delete_failed`, `replacement_committed`, and
-`replacement_rollback_failed`, including bucket/key and known IDs.
+`old_delete_failed`, `replacement_committed`,
+`replacement_rollback_failed`, and `replacement_ambiguous_data_preserved`,
+including bucket/key and known IDs. Never attach a raw upstream error as
+`Error.cause`: Pino's serializer walks the chain and would print a
+`DrimeApiError` response body, so wrap causes in sanitized errors that keep the
+status and drop the body.
 
 - [ ] **Step 5: Ensure rollback never masks the original stage**
 
-If candidate deletion succeeds, throw the original stage error. If candidate
-deletion fails, log both errors and throw `ObjectReplacementError` with stage
-`candidate_rollback` and the original error as `cause`.
+Roll back only where the old object is known to be intact (metadata stage, or a
+confirmed-present old entry). If candidate deletion succeeds, throw the
+original stage error. If candidate deletion fails, log both errors and throw
+`ObjectReplacementError` with stage `candidate_rollback` and the original error
+as `cause`. Never roll back from the ambiguous state described in Step 4.
 
 - [ ] **Step 6: Run focused tests**
 

@@ -96,8 +96,11 @@ they see the candidate. The unavoidable duplicate-name interval exists only
 between candidate creation and old-entry deletion.
 
 If steps 1 or 2 fail, delete the candidate and leave the old entry untouched.
-If old-entry deletion fails, roll back the candidate and continue serving the
-old entry. Success is returned only after publication.
+If old-entry deletion fails, confirm the real upstream state by fresh listing
+and then either continue as committed, roll back the candidate while the old
+entry is known to be present, or — when the state stays unknown — keep both
+versions and fail the write (see §6). Success is returned only after
+publication.
 
 ### 5.3 Read-your-writes overlay
 
@@ -131,12 +134,34 @@ presigned URL and response credentials.
 
 ## 6. Idempotency and Failure Handling
 
-- A Drime 422 during old-entry deletion is not automatically success. Perform a
-  fresh listing: if the exact old ID is absent, treat deletion as already
-  complete; otherwise fail and roll back.
+- No old-entry deletion error is automatically success. **Every** deletion
+  error — the exact invalid-entry-IDs 422, any 5xx, and network or timeout
+  failures alike — is resolved against fresh, uncached listings. The Drime 422
+  classification is diagnostic only; it no longer decides control flow.
+- A successful commit requires positive proof of both halves of the
+  replacement: the candidate ID present **and** the old ID absent. An absent
+  old ID alone is not accepted, because a listing that shows neither row
+  establishes nothing.
+- **Ambiguous-delete policy (user-approved, data preservation over
+  tidiness):** if the confirmation window ends without a known state — every
+  listing failed, or the final listing shows neither the candidate committed
+  nor the old entry present — the candidate is **kept**, no success is
+  published, and the caller receives an explicit `old_delete` failure plus a
+  high-severity `replacement_ambiguous_data_preserved` log carrying only safe
+  identifiers. This can leave a duplicate or an orphan for an operator to
+  reconcile; it cannot delete both versions of the object. A duplicate is
+  recoverable, a double delete is not.
+- The candidate is rolled back only when the old entry is known to be intact:
+  the metadata stage failed before the old entry was touched, or the final
+  confirmation listing still shows the old ID. Only the final poll may
+  establish `old_present`, so a stale listing early in the window cannot
+  trigger a rollback that races a deletion Drime has already applied.
 - Candidate cleanup is best effort when the candidate ID is known. Cleanup
   failure returns 500 and emits a high-severity log with bucket, key, old ID,
   candidate ID, and failed stage.
+- The public ETag is validated as a 32-character MD5 or a composite
+  `md5hex-partCount` with a positive part count before it is persisted; a
+  malformed ETag fails the write rather than poisoning later HEAD/GET parity.
 - Resolver behavior must be deterministic if historical duplicates already
   exist. Prefer the entry selected by an active replacement overlay; without
   one, report the duplicate rather than silently choosing an arbitrary entry
@@ -159,9 +184,13 @@ flowchart TD
     Publish --> Success[Return S3 success]
     Normalize -->|failure| Cleanup[Delete candidate]
     Persist -->|failure| Cleanup
-    DeleteOld -->|failure| Rollback[Delete candidate and retain old]
+    DeleteOld -->|error| Confirm[Poll fresh listings]
+    Confirm -->|candidate present and old absent| Publish
+    Confirm -->|old still present| Rollback[Delete candidate and retain old]
+    Confirm -->|state unknown| Preserve[Keep both versions]
     Cleanup --> Failure[Return S3 error]
     Rollback --> Failure
+    Preserve --> Failure
 ```
 
 ## 8. Tests
@@ -177,6 +206,13 @@ flowchart TD
 - Client multipart completion exposes and persists the composite ETag.
 - Overlay merges into cache hits and in-flight/fresh listing results.
 - Overlay reconciliation removes converged replacements.
+- A delete error whose fresh listing shows the candidate present and the old ID
+  absent commits, for the invalid-entry-IDs 422 and for 5xx/timeout alike.
+- A listing missing the candidate is not accepted as a successful delete.
+- Failed or inconclusive confirmation keeps the candidate and fails the write.
+- Thrown coordinator errors carry sanitized causes: serializing them with Pino
+  never reveals an upstream response body.
+- A malformed public ETag is rejected before persistence.
 
 ### Integration tests
 
@@ -195,12 +231,17 @@ flowchart TD
 ## 9. Observability
 
 Emit structured logs for `upload_part_retry`, `candidate_registered`,
-`etag_persist_failed`, `old_delete_failed`, `replacement_committed`, and
-`replacement_rollback_failed`. Include request ID, bucket, key, stage, entry
-IDs, part number, attempt, and status where applicable.
+`etag_persist_failed`, `old_delete_failed`, `replacement_committed`,
+`replacement_rollback_failed`, and `replacement_ambiguous_data_preserved`.
+Include request ID, bucket, key, stage, entry IDs, part number, attempt, and
+status where applicable. `old_delete_failed` also carries the confirmation
+outcome (`committed`, `old_present`, or `unknown`).
 
 Never include API keys, authorization headers, request bodies, or presigned
-URLs.
+URLs. Upstream errors are never attached as an `Error.cause` in raw form:
+Pino's error serializer walks the `cause` chain and would republish a
+`DrimeApiError` response-body preview, so causes are replaced with sanitized
+errors that carry the status without the body.
 
 ## 10. Rollout
 
@@ -225,3 +266,5 @@ URLs.
 - Immediate HEAD after successful completion returns the exact response ETag.
 - No successful response is emitted before ETag persistence and cache
   publication complete.
+- No failure path can delete both the old entry and its replacement: an
+  unresolvable delete error leaves at least one complete version readable.
