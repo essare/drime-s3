@@ -87,6 +87,18 @@ function toContent(entry: FileEntry, key: string): ListBucketEntry {
   };
 }
 
+/** Keep the first row per key so ListObjects matches GET/HEAD readable order. */
+function firstReadableContents(contents: ListBucketEntry[]): ListBucketEntry[] {
+  const seen = new Set<string>();
+  const out: ListBucketEntry[] = [];
+  for (const row of contents) {
+    if (seen.has(row.Key)) continue;
+    seen.add(row.Key);
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Resolve `relativePath` (no slashes at ends) as folder segments under `startFolderId`.
  * Folder segments are matched case-insensitively (Python `_find_folder_id`).
@@ -247,10 +259,12 @@ export async function listObjectsCore(
 
   if (delimiter.length > 0) {
     const r = await listWithDelimiter(ctx, W, folderId, basePrefix);
-    contents = r.contents;
+    contents = firstReadableContents(r.contents);
     folders = r.folders;
   } else {
-    contents = await listRecursive(ctx, W, folderId, basePrefix);
+    contents = firstReadableContents(
+      await listRecursive(ctx, W, folderId, basePrefix),
+    );
   }
 
   // Apply the full prefix as a string filter (covers the file-name portion that
