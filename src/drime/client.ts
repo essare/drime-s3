@@ -29,6 +29,22 @@ export class DrimeApiError extends Error {
   }
 }
 
+/**
+ * Exact production body Drime returns from `POST /file-entries/delete` when an
+ * entry id no longer exists (e.g. a stale listing resurrected a deleted row).
+ * Only this 422 is safe to treat as a possibly-already-deleted entry, and only
+ * after a fresh listing confirms the id is gone.
+ */
+const INVALID_ENTRY_IDS_MESSAGE = "selected entry ids is invalid";
+
+export function isInvalidEntryIdsError(error: unknown): boolean {
+  return (
+    error instanceof DrimeApiError &&
+    error.status === 422 &&
+    error.body.includes(INVALID_ENTRY_IDS_MESSAGE)
+  );
+}
+
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_ATTEMPTS = 5;
 const PER_PAGE = 100;
