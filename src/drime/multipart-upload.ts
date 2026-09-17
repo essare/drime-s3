@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import type { AppContext } from "../server-context";
 
@@ -83,8 +82,6 @@ export type MultipartUploadOptions = {
 };
 
 export type MultipartUploadResult = {
-  /** Quoted composite multipart-style ETag from internal transport only. */
-  transportEtag: string;
   /** Final byte length stored. */
   size: number;
   /** Raw `s3CreateEntry` response; the handler chooses the public S3 ETag. */
@@ -194,7 +191,6 @@ export async function uploadFileViaInternalMultipart(
   }
 
   return {
-    transportEtag: compositeMultipartEtag(partEtags),
     size: opts.totalSize,
     entryRaw,
   };
@@ -309,24 +305,4 @@ async function batchSignAllParts(
     );
   }
   return out;
-}
-
-/**
- * Composite multipart ETag using S3's "MD5-of-MD5s + '-' + partCount" format.
- * Each input is an opaque per-part ETag returned by Drime's storage backend
- * (typically a 32-char MD5 hex string). Non-hex ETags fall back to MD5(text).
- */
-function compositeMultipartEtag(partEtagsHex: string[]): string {
-  const digests: Buffer[] = [];
-  for (const raw of partEtagsHex) {
-    const hex = raw.replace(/^"+|"+$/g, "");
-    if (/^[a-f0-9]{32}$/i.test(hex)) {
-      digests.push(Buffer.from(hex, "hex"));
-    } else {
-      digests.push(createHash("md5").update(hex, "utf8").digest());
-    }
-  }
-  const combined = Buffer.concat(digests);
-  const md5 = createHash("md5").update(combined).digest("hex");
-  return `"${md5}-${partEtagsHex.length}"`;
 }
