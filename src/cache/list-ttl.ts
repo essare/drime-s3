@@ -105,6 +105,16 @@ export class ListTtlCache {
     this.trimReplacementsIfNeeded();
   }
 
+  /**
+   * Drop the replacement overlay for `name` in this folder. S3 object delete
+   * must call this so a create-first overlay cannot resurrect a deleted key.
+   */
+  clearReplacement(folderId: number | null, name: string): void {
+    const folderReplacements = this.replacements.get(cacheKey(folderId));
+    const replacement = folderReplacements?.get(name);
+    if (replacement) this.deleteReplacement(replacement);
+  }
+
   private trimIfNeeded(): void {
     while (this.cache.size > MAX_CACHED_KEYS) {
       const first = this.cache.keys().next().value;

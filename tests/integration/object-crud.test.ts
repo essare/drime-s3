@@ -2,8 +2,20 @@ import { describe, expect, test } from "bun:test";
 import pino from "pino";
 import type { AppConfig } from "../../src/config";
 import { dispatch } from "../../src/s3/router";
-import { createAppContext } from "../../src/server-context";
+import { type AppContext, createAppContext } from "../../src/server-context";
 import { startMockDrime } from "../fixtures/mock-drime/server";
+
+const HOST = "127.0.0.1:8081";
+const BASE = `http://${HOST}`;
+const H = { Host: HOST };
+
+/** Independent MD5 of `old-backup-v1` (Python hashlib). */
+const OLD_BACKUP_MD5 = "54f5724a5d9eb20787d75f87e11a1651";
+/** Independent MD5 of `new-backup-v2` (Python hashlib). */
+const NEW_BACKUP_MD5 = "d8f9416b74f6ac906038204b79b7022e";
+/** Independent MD5 of `abcdefghijklmnopqrstuvwxyz012345` (Python hashlib). */
+const MULTIPART_BODY_MD5 = "357e82db934fc45f4a25b4b83dc8bd19";
+const MULTIPART_BODY = "abcdefghijklmnopqrstuvwxyz012345";
 
 function testConfig(apiBaseUrl: string): AppConfig {
   return {
@@ -21,6 +33,62 @@ function testConfig(apiBaseUrl: string): AppConfig {
     webUi: { password: "", sessionSecret: "" },
     insecure: true,
   };
+}
+
+async function createCtx(apiBaseUrl: string): Promise<AppContext> {
+  return createAppContext({
+    config: testConfig(apiBaseUrl),
+    logger: pino({ level: "silent" }),
+  });
+}
+
+async function putBucket(ctx: AppContext, bucket: string): Promise<Response> {
+  return dispatch(
+    ctx,
+    new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+  );
+}
+
+async function putObject(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+  body: string,
+): Promise<Response> {
+  return dispatch(
+    ctx,
+    new Request(`${BASE}/${bucket}/${key}`, {
+      method: "PUT",
+      headers: {
+        ...H,
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(Buffer.byteLength(body, "utf8")),
+      },
+      body,
+    }),
+  );
+}
+
+async function getObject(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+): Promise<Response> {
+  return dispatch(
+    ctx,
+    new Request(`${BASE}/${bucket}/${key}`, { method: "GET", headers: H }),
+  );
+}
+
+async function headObject(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+): Promise<Response> {
+  return dispatch(
+    ctx,
+    new Request(`${BASE}/${bucket}/${key}`, { method: "HEAD", headers: H }),
+  );
 }
 
 describe("Object CRUD", () => {
@@ -117,6 +185,126 @@ describe("Object CRUD", () => {
         }),
       );
       expect(delMissing.status).toBe(204);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("overwrite backup.bin returns new bytes and full-body MD5", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "replace-bucket";
+      await putBucket(ctx, bucket);
+
+      const first = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(first.status).toBe(200);
+      expect(first.headers.get("etag")).toBe(`"${OLD_BACKUP_MD5}"`);
+
+      const second = await putObject(
+        ctx,
+        bucket,
+        "backup.bin",
+        "new-backup-v2",
+      );
+      expect(second.status).toBe(200);
+      expect(second.headers.get("etag")).toBe(`"${NEW_BACKUP_MD5}"`);
+
+      const head = await headObject(ctx, bucket, "backup.bin");
+      expect(head.status).toBe(200);
+      expect(head.headers.get("etag")).toBe(`"${NEW_BACKUP_MD5}"`);
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("new-backup-v2");
+      expect(got.headers.get("etag")).toBe(`"${NEW_BACKUP_MD5}"`);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("internal multipart PUT still returns full-body MD5", async () => {
+    const mock = await startMockDrime();
+    const prevThreshold = process.env.DRIME_S3_MULTIPART_THRESHOLD_BYTES;
+    process.env.DRIME_S3_MULTIPART_THRESHOLD_BYTES = "8";
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "mp-md5-bucket";
+      await putBucket(ctx, bucket);
+
+      const put = await putObject(ctx, bucket, "backup.bin", MULTIPART_BODY);
+      expect(put.status).toBe(200);
+      const etag = put.headers.get("etag");
+      expect(etag).toBe(`"${MULTIPART_BODY_MD5}"`);
+      expect(etag).not.toMatch(/-[0-9]+"$/);
+
+      const head = await headObject(ctx, bucket, "backup.bin");
+      expect(head.status).toBe(200);
+      expect(head.headers.get("etag")).toBe(`"${MULTIPART_BODY_MD5}"`);
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe(MULTIPART_BODY);
+    } finally {
+      if (prevThreshold === undefined) {
+        delete process.env.DRIME_S3_MULTIPART_THRESHOLD_BYTES;
+      } else {
+        process.env.DRIME_S3_MULTIPART_THRESHOLD_BYTES = prevThreshold;
+      }
+      mock.stop();
+    }
+  });
+
+  test("metadata failure during overwrite returns 500 and preserves old bytes", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "meta-fail-bucket";
+      await putBucket(ctx, bucket);
+
+      const first = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(first.status).toBe(200);
+
+      mock.metadataFailureCount = 1;
+      const second = await putObject(
+        ctx,
+        bucket,
+        "backup.bin",
+        "new-backup-v2",
+      );
+      expect(second.status).toBe(500);
+      expect(await second.text()).toContain("InternalError");
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-backup-v1");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("candidate upload failure preserves old bytes", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "upload-fail-bucket";
+      await putBucket(ctx, bucket);
+
+      const first = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(first.status).toBe(200);
+
+      mock.uploadFailureCount = 1;
+      const second = await putObject(
+        ctx,
+        bucket,
+        "backup.bin",
+        "new-backup-v2",
+      );
+      expect(second.status).toBe(500);
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-backup-v1");
     } finally {
       mock.stop();
     }

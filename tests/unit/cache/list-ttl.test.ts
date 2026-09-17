@@ -275,6 +275,17 @@ describe("ListTtlCache replacement overlay", () => {
     expect(cache.replacementOverlaySize).toBe(0);
   });
 
+  test("clearReplacement stops overlay from resurrecting a deleted object", async () => {
+    const cache = new ListTtlCache();
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, 1, newEntry);
+    cache.clearReplacement(7, "backup.bin");
+    cache.invalidate(7);
+
+    await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([]);
+    expect(cache.replacementOverlaySize).toBe(0);
+  });
+
   test("expires after 60 seconds and reports non-convergence once", async () => {
     const expired: unknown[] = [];
     const cache = new ListTtlCache((event) => expired.push(event));

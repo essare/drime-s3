@@ -112,7 +112,7 @@ describe("internal multipart part retries", () => {
 
     await expect(run.upload).resolves.toMatchObject({
       size: 16,
-      fileEntryId: 123,
+      entryRaw: { fileEntry: { id: 123 } },
     });
     expect(run.putUnsignedUrl).toHaveBeenCalledTimes(2);
     expect(run.complete).toHaveBeenCalledTimes(1);

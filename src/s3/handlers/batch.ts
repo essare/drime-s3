@@ -91,7 +91,12 @@ export async function handleDeleteObjects(
   const errors: { Key: string; Code: string; Message: string }[] = [];
   const parentIdsToInvalidate = new Set<number>();
 
-  const toDelete: { key: string; id: number; parentId: number }[] = [];
+  const toDelete: {
+    key: string;
+    id: number;
+    parentId: number;
+    name: string;
+  }[] = [];
 
   await Promise.all(
     keys.map(async (objectKey) => {
@@ -110,6 +115,7 @@ export async function handleDeleteObjects(
         key: objectKey,
         id: r.entry.id,
         parentId: r.parentFolderId,
+        name: r.entry.name,
       });
     }),
   );
@@ -120,6 +126,7 @@ export async function handleDeleteObjects(
       for (const t of toDelete) {
         deleted.push({ Key: t.key });
         parentIdsToInvalidate.add(t.parentId);
+        ctx.listCache.clearReplacement(t.parentId, t.name);
       }
       for (const pid of parentIdsToInvalidate) {
         ctx.listCache.invalidate(pid);

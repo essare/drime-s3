@@ -18,12 +18,49 @@ type Entry = {
   description?: string | null;
 };
 
+export type CreatedEntryShape =
+  | "fileEntry"
+  | "file"
+  | "entry"
+  | "data"
+  | "direct";
+
 export type StartMockDrimeOptions = {
   /** Workspace id used for seeded folders (default `1`). */
   workspaceId?: number;
   /** Folder names created at workspace root (valid Drime `type: "folder"` rows). */
   seedRootFolders?: string[];
+  /** Remaining forced 500s for POST `/uploads` and POST `/s3/entries`. */
+  uploadFailureCount?: number;
+  /** Remaining forced 500s for PUT `/file-entries/:id`. */
+  metadataFailureCount?: number;
+  /** Remaining forced 500s for POST `/file-entries/delete`. */
+  deleteFailureCount?: number;
+  /** Wrapper used for created-file JSON. Default matches current `{ fileEntry }`. */
+  createdEntryShape?: CreatedEntryShape;
 };
+
+function wrapCreatedEntry(
+  row: Record<string, unknown>,
+  shape: CreatedEntryShape,
+): unknown {
+  switch (shape) {
+    case "file":
+      return { file: row };
+    case "entry":
+      return { entry: row };
+    case "data":
+      return { data: row };
+    case "direct":
+      return row;
+    default:
+      return { fileEntry: row };
+  }
+}
+
+function forcedFailureResponse(): Response {
+  return json({ error: "forced failure" }, 500);
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -132,6 +169,12 @@ function downloadResponse(
 export type MockDrimeServer = {
   baseUrl: string;
   stop(): void;
+  /** Remaining forced 500s for candidate upload/registration. Mutate between requests. */
+  uploadFailureCount: number;
+  /** Remaining forced 500s for metadata updates. Mutate between requests. */
+  metadataFailureCount: number;
+  /** Remaining forced 500s for deletes. Mutate between requests. */
+  deleteFailureCount: number;
 };
 
 /**
@@ -164,6 +207,26 @@ export async function startMockDrime(
       updated_at: "2024-01-01T00:00:00.000Z",
     });
   }
+
+  const createdEntryShape: CreatedEntryShape =
+    options.createdEntryShape ?? "fileEntry";
+  const handle: MockDrimeServer = {
+    baseUrl: "",
+    stop() {},
+    uploadFailureCount: options.uploadFailureCount ?? 0,
+    metadataFailureCount: options.metadataFailureCount ?? 0,
+    deleteFailureCount: options.deleteFailureCount ?? 0,
+  };
+
+  const takeFault = (
+    key: "uploadFailureCount" | "metadataFailureCount" | "deleteFailureCount",
+  ): boolean => {
+    if (handle[key] > 0) {
+      handle[key] -= 1;
+      return true;
+    }
+    return false;
+  };
 
   const server = Bun.serve({
     port: 0,
@@ -267,6 +330,7 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/uploads") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) return forcedFailureResponse();
           const ct = req.headers.get("content-type") ?? "";
           let parentId: number | null = null;
           let ws = workspaceId;
@@ -307,7 +371,9 @@ export async function startMockDrime(
           entries.push(row);
           fileBytes.set(id, payload);
           rollupFolderBytes(entries, parentId, payload.length);
-          return json({ fileEntry: entryToJson(row, url.origin) });
+          return json(
+            wrapCreatedEntry(entryToJson(row, url.origin), createdEntryShape),
+          );
         })();
       }
 
@@ -324,6 +390,7 @@ export async function startMockDrime(
       const entryPutMatch = /^\/file-entries\/(\d+)$/.exec(path);
       if (req.method === "PUT" && entryPutMatch) {
         return (async () => {
+          if (takeFault("metadataFailureCount")) return forcedFailureResponse();
           const id = Number(entryPutMatch[1]);
           const row = entries.find((e) => e.id === id);
           if (row === undefined) {
@@ -339,6 +406,7 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/file-entries/delete") {
         return (async () => {
+          if (takeFault("deleteFailureCount")) return forcedFailureResponse();
           const body = (await req.json()) as { entryIds?: number[] };
           const ids = new Set(body.entryIds ?? []);
           for (let i = entries.length - 1; i >= 0; i--) {
@@ -440,6 +508,7 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/s3/entries") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) return forcedFailureResponse();
           const body = (await req.json()) as {
             filename?: string;
             clientName?: string;
@@ -487,7 +556,9 @@ export async function startMockDrime(
           };
           entries.push(row);
           fileBytes.set(id, bytes);
-          return json({ fileEntry: entryToJson(row, url.origin) });
+          return json(
+            wrapCreatedEntry(entryToJson(row, url.origin), createdEntryShape),
+          );
         })();
       }
 
@@ -495,12 +566,9 @@ export async function startMockDrime(
     },
   });
 
-  const baseUrl = `http://127.0.0.1:${server.port}`;
-
-  return {
-    baseUrl,
-    stop() {
-      server.stop();
-    },
+  handle.baseUrl = `http://127.0.0.1:${server.port}`;
+  handle.stop = () => {
+    server.stop();
   };
+  return handle;
 }

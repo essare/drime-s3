@@ -83,12 +83,12 @@ export type MultipartUploadOptions = {
 };
 
 export type MultipartUploadResult = {
-  /** Quoted composite multipart-style ETag (md5-of-md5s + "-" + partCount). */
-  etag: string;
+  /** Quoted composite multipart-style ETag from internal transport only. */
+  transportEtag: string;
   /** Final byte length stored. */
   size: number;
-  /** Drime fileEntry id, when discoverable from `s3CreateEntry` response. */
-  fileEntryId?: number;
+  /** Raw `s3CreateEntry` response; the handler chooses the public S3 ETag. */
+  entryRaw: unknown;
 };
 
 /**
@@ -194,9 +194,9 @@ export async function uploadFileViaInternalMultipart(
   }
 
   return {
-    etag: compositeMultipartEtag(partEtags),
+    transportEtag: compositeMultipartEtag(partEtags),
     size: opts.totalSize,
-    fileEntryId: parseFileEntryId(entryRaw),
+    entryRaw,
   };
 }
 
@@ -330,13 +330,4 @@ function compositeMultipartEtag(partEtagsHex: string[]): string {
   const combined = Buffer.concat(digests);
   const md5 = createHash("md5").update(combined).digest("hex");
   return `"${md5}-${partEtagsHex.length}"`;
-}
-
-function parseFileEntryId(raw: unknown): number | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const o = raw as Record<string, unknown>;
-  const fe = o.fileEntry ?? o.file ?? o.entry;
-  if (!fe || typeof fe !== "object") return undefined;
-  const id = (fe as Record<string, unknown>).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
 }

@@ -33,7 +33,7 @@ describe("PUT /_admin/buckets/:b/objects/*key (multipart fallback)", () => {
     }
   });
 
-  test("uses multipart for bodies above the threshold and returns composite ETag", async () => {
+  test("uses multipart transport for bodies above the threshold and returns full-body MD5", async () => {
     const setup = await startAdmin({
       password: "hunter2-hunter2",
       seedRootFolders: ["docs"],
@@ -63,8 +63,9 @@ describe("PUT /_admin/buckets/:b/objects/*key (multipart fallback)", () => {
       expect(res.status).toBe(200);
       const j = (await res.json()) as { etag: string; size: number };
       expect(j.size).toBe(totalSize);
-      // Composite multipart ETag: 32-hex-md5 + "-" + partCount, quoted.
-      expect(j.etag).toMatch(/^"[0-9a-f]{32}-4"$/);
+      // Ordinary PUT always exposes full-body MD5, even when internal
+      // transport used multipart. Independent MD5 of bytes[i] = i & 0xff.
+      expect(j.etag).toBe('"d19215b1d714757e1fdb0060c52fd4c8"');
 
       const listed = await setup.call(
         new Request(`${ORIG}/_admin/buckets/docs/objects?prefix=`, {
@@ -77,9 +78,7 @@ describe("PUT /_admin/buckets/:b/objects/*key (multipart fallback)", () => {
       const obj = lj.objects.find((o) => o.key === "big.bin");
       expect(obj).toBeDefined();
       expect(obj?.size).toBe(totalSize);
-      // Subsequent listings should surface the same composite ETag (persisted
-      // in the entry description by the multipart path).
-      expect(obj?.etag).toMatch(/^"[0-9a-f]{32}-4"$/);
+      expect(obj?.etag).toBe('"d19215b1d714757e1fdb0060c52fd4c8"');
     } finally {
       setup.cleanup();
     }
