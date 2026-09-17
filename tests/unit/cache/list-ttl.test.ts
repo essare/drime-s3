@@ -223,6 +223,16 @@ describe("ListTtlCache replacement overlay", () => {
     ]);
   });
 
+  test("suppresses a stale same-name entry with a different old id", async () => {
+    const cache = new ListTtlCache();
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, 1, newEntry);
+
+    await expect(
+      cache.getOrFetch(7, async () => [folderEntry(99, "backup.bin")]),
+    ).resolves.toEqual([newEntry]);
+  });
+
   test("does not reconcile from an overlay-transformed cache hit", async () => {
     const cache = new ListTtlCache();
     const oldEntry = folderEntry(1, "backup.bin");
@@ -305,5 +315,20 @@ describe("ListTtlCache replacement overlay", () => {
     }
 
     expect(cache.replacementOverlaySize).toBe(5000);
+  });
+
+  test("bounds replacement overlays within one folder", async () => {
+    const cache = new ListTtlCache();
+
+    for (let id = 0; id <= 5000; id += 1) {
+      cache.replaceEntry(7, id, folderEntry(id + 10_000, `entry-${id}`));
+    }
+
+    expect(cache.replacementOverlaySize).toBe(5000);
+    const entries = await cache.getOrFetch(7, async () => [
+      folderEntry(0, "entry-0"),
+    ]);
+    expect(entries.some((entry) => entry.id === 0)).toBe(true);
+    expect(entries.some((entry) => entry.id === 10_000)).toBe(false);
   });
 });

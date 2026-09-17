@@ -33,6 +33,10 @@ export class ListTtlCache {
     string,
     Map<string, ReplacementOverlay>
   >();
+  private readonly replacementOrder = new Map<
+    ReplacementOverlay,
+    { folderKey: string; name: string }
+  >();
 
   constructor(
     private readonly onReplacementExpired: (
@@ -86,20 +90,23 @@ export class ListTtlCache {
       folderReplacements = new Map();
       this.replacements.set(k, folderReplacements);
     }
-    folderReplacements.set(newEntry.name, {
+    const previous = folderReplacements.get(newEntry.name);
+    if (previous) this.replacementOrder.delete(previous);
+    const replacement = {
       oldEntryId,
       newEntry,
       expiresAt: Date.now() + REPLACEMENT_OVERLAY_MS,
+    };
+    folderReplacements.set(newEntry.name, replacement);
+    this.replacementOrder.set(replacement, {
+      folderKey: k,
+      name: newEntry.name,
     });
-    this.trimReplacementFoldersIfNeeded();
+    this.trimReplacementsIfNeeded();
 
     const cached = this.cache.get(k);
     if (!cached) return;
-    cached.entries = this.mergeReplacement(cached.entries, {
-      oldEntryId,
-      newEntry,
-      expiresAt: Number.POSITIVE_INFINITY,
-    });
+    cached.entries = this.mergeReplacement(cached.entries, replacement);
     cached.ts = Date.now();
   }
 
@@ -111,11 +118,24 @@ export class ListTtlCache {
     }
   }
 
-  private trimReplacementFoldersIfNeeded(): void {
-    while (this.replacements.size > MAX_CACHED_KEYS) {
-      const first = this.replacements.keys().next().value;
+  private trimReplacementsIfNeeded(): void {
+    while (this.replacementOrder.size > MAX_CACHED_KEYS) {
+      const first = this.replacementOrder.keys().next().value;
       if (first === undefined) break;
-      this.replacements.delete(first);
+      this.deleteReplacement(first);
+    }
+  }
+
+  private deleteReplacement(replacement: ReplacementOverlay): void {
+    const location = this.replacementOrder.get(replacement);
+    if (!location) return;
+    this.replacementOrder.delete(replacement);
+
+    const folderReplacements = this.replacements.get(location.folderKey);
+    if (folderReplacements?.get(location.name) !== replacement) return;
+    folderReplacements.delete(location.name);
+    if (folderReplacements.size === 0) {
+      this.replacements.delete(location.folderKey);
     }
   }
 
@@ -145,7 +165,7 @@ export class ListTtlCache {
     const now = Date.now();
     for (const [name, replacement] of folderReplacements) {
       if (replacement.expiresAt <= now) {
-        folderReplacements.delete(name);
+        this.deleteReplacement(replacement);
         this.onReplacementExpired({
           folderId: k === "__root__" ? null : Number(k),
           name,
@@ -163,7 +183,7 @@ export class ListTtlCache {
           replacement.oldEntryId !== undefined &&
           rows.some((row) => row.id === replacement.oldEntryId);
         if (hasNewEntry && !hasOldEntry) {
-          folderReplacements.delete(name);
+          this.deleteReplacement(replacement);
           continue;
         }
       }
@@ -171,7 +191,6 @@ export class ListTtlCache {
       merged = this.mergeReplacement(merged, replacement);
     }
 
-    if (folderReplacements.size === 0) this.replacements.delete(k);
     return merged;
   }
 
@@ -228,10 +247,6 @@ export class ListTtlCache {
 
   get replacementOverlaySize(): number {
     this.pruneExpiredReplacements();
-    let size = 0;
-    for (const replacements of this.replacements.values()) {
-      size += replacements.size;
-    }
-    return size;
+    return this.replacementOrder.size;
   }
 }
