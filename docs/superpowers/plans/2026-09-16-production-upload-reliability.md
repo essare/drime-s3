@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make S3 writes preserve the old object on failure, retry transient multipart part failures, and expose the correct ETag immediately after success.
+**Goal:** Make S3 writes preserve at least one complete object version across failures, retry transient multipart part failures, and expose the correct ETag immediately after success.
 
 **Architecture:** Normalize every Drime upload response into one `FileEntry`, then pass it through a shared create-first replacement coordinator that persists mandatory ETag metadata before deleting the old entry. Add a short-lived authoritative overlay to the list cache so stale Drive listings cannot resurrect the old entry, and retry replay-safe internal multipart part PUTs locally.
 
@@ -772,8 +772,10 @@ Extend `tests/integration/multipart.test.ts` with separate tests:
 - verify Complete response ETag equals immediate HEAD and GET ETag;
 - verify the old ID never resurfaces through list;
 - metadata failure returns 500 and preserves old bytes;
-- confirmed already-absent old ID after 422 still commits the candidate;
-- unresolved old deletion rolls back the candidate;
+- a 422 whose fresh listing shows the candidate present and the old ID absent
+  still commits the candidate;
+- unresolved old deletion retains the candidate, publishes no success, and
+  returns an error;
 - part status sequence `[502, 200]` completes successfully.
 
 Use two 16-byte parts in the retry case and assert the mock received the failed

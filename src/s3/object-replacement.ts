@@ -245,7 +245,7 @@ export async function commitObjectReplacement(
          */
         ctx.logger.error(fields, "old_delete_failed");
         ctx.logger.error(
-          { ...fields, candidateRetained: true, dataPreserved: true },
+          { ...fields, candidateRetained: true },
           "replacement_ambiguous_data_preserved",
         );
         throw new ObjectReplacementError(

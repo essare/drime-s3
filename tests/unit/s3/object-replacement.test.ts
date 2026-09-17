@@ -467,6 +467,7 @@ describe("commitObjectReplacement", () => {
     const preservedLog = fake.logs.at(-1);
     expect(preservedLog?.level).toBe("error");
     expect(preservedLog?.fields.candidateRetained).toBe(true);
+    expect(preservedLog?.fields.dataPreserved).toBeUndefined();
     expect(preservedLog?.fields.confirmation).toBe("unknown");
     expect(preservedLog?.fields.candidateId).toBe(CANDIDATE_ID);
     expect(preservedLog?.fields.oldEntryId).toBe(OLD_ID);
@@ -495,6 +496,8 @@ describe("commitObjectReplacement", () => {
     expect(messages(fake.logs).at(-1)).toBe(
       "replacement_ambiguous_data_preserved",
     );
+    expect(fake.logs.at(-1)?.fields.candidateRetained).toBe(true);
+    expect(fake.logs.at(-1)?.fields.dataPreserved).toBeUndefined();
     expect(String(fake.logs.at(-1)?.fields.confirmErr)).toContain(
       "Drime API error 500",
     );
@@ -524,6 +527,8 @@ describe("commitObjectReplacement", () => {
       "replacement_ambiguous_data_preserved",
     );
     expect(fake.logs.at(-1)?.fields.confirmation).toBe("unknown");
+    expect(fake.logs.at(-1)?.fields.candidateRetained).toBe(true);
+    expect(fake.logs.at(-1)?.fields.dataPreserved).toBeUndefined();
   });
 
   test("rollback failure reports candidate_rollback without masking the cause", async () => {
