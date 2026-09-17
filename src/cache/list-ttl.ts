@@ -16,6 +16,16 @@ type ReplacementOverlay = {
   expiresAt: number;
 };
 
+/** True when the upstream row for the candidate has the overlay's description. */
+function upstreamCarriesCommittedDescription(
+  rows: FileEntry[],
+  replacement: ReplacementOverlay,
+): boolean {
+  const upstream = rows.find((row) => row.id === replacement.newEntry.id);
+  if (!upstream) return false;
+  return (upstream.description ?? null) === (replacement.newEntry.description ?? null);
+}
+
 export type ReplacementOverlayExpired = {
   folderId: number | null;
   name: string;
@@ -203,7 +213,18 @@ export class ListTtlCache {
         const hasOldEntry =
           replacement.oldEntryId !== undefined &&
           rows.some((row) => row.id === replacement.oldEntryId);
-        if (hasNewEntry && !hasOldEntry) {
+        /**
+         * Only drop the overlay once upstream has converged *and* carries the
+         * committed ETag description. Drime list payloads often show the new
+         * id before `PUT /file-entries/:id` description is visible; dropping
+         * early makes HEAD return a synthetic plain MD5 and rclone fails with
+         * `md5 hashes differ` / `Etag differ: expecting …-N`.
+         */
+        if (
+          hasNewEntry &&
+          !hasOldEntry &&
+          upstreamCarriesCommittedDescription(rows, replacement)
+        ) {
           this.deleteReplacement(replacement);
           continue;
         }

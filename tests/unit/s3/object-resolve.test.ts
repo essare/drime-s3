@@ -82,6 +82,44 @@ describe("resolveObjectKey duplicates", () => {
     });
   });
 
+  test("keeps committed ETag description when upstream list omits it after converge", async () => {
+    const oldEntry = fileEntry(11, "backup.bin");
+    const committed: FileEntry = {
+      ...fileEntry(33, "backup.bin"),
+      description: "md5:cccccccccccccccccccccccccccccccc-41",
+    };
+    const upstreamWeak: FileEntry = {
+      ...fileEntry(33, "backup.bin"),
+      description: null,
+    };
+    const listCache = new ListTtlCache();
+    const ctx = {
+      listCache,
+      folderCache: new FolderPathCache(),
+      drime: {
+        listFolder: async () => [upstreamWeak],
+      },
+      logger: {
+        error() {},
+      },
+    } as unknown as AppContext;
+    listCache.replaceEntry(7, oldEntry.id, committed);
+
+    const resolved = await resolveObjectKey(
+      ctx,
+      1,
+      7,
+      "dup-bucket",
+      "backup.bin",
+    );
+
+    expect(resolved).toEqual({
+      kind: "file",
+      entry: committed,
+      parentFolderId: 7,
+    });
+  });
+
   test("readableObjectEntry stays available on ambiguous duplicates", () => {
     const first = fileEntry(11, "backup.bin");
     const second = fileEntry(22, "backup.bin");

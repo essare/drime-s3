@@ -275,6 +275,45 @@ describe("ListTtlCache replacement overlay", () => {
     expect(cache.replacementOverlaySize).toBe(0);
   });
 
+  test("keeps overlay when upstream candidate lacks the committed ETag description", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const committed: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      file_size: 200 * 1024 * 1024,
+      description: "md5:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-41",
+    };
+    const upstreamWeak: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      file_size: 200 * 1024 * 1024,
+      description: null,
+    };
+    cache.replaceEntry(7, oldEntry.id, committed);
+
+    await expect(
+      cache.getOrFetch(7, async () => [upstreamWeak]),
+    ).resolves.toEqual([committed]);
+    expect(cache.replacementOverlaySize).toBe(1);
+  });
+
+  test("reconciles once upstream candidate carries the same ETag description", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const committed: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      description: "md5:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-13",
+    };
+    cache.replaceEntry(7, oldEntry.id, committed);
+
+    await expect(
+      cache.getOrFetch(7, async () => [{ ...committed }]),
+    ).resolves.toEqual([committed]);
+    expect(cache.replacementOverlaySize).toBe(0);
+  });
+
   test("clearReplacement stops overlay from resurrecting a deleted object", async () => {
     const cache = new ListTtlCache();
     const newEntry = folderEntry(2, "backup.bin");
