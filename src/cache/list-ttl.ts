@@ -122,14 +122,26 @@ export class ListTtlCache {
     while (this.replacementOrder.size > MAX_CACHED_KEYS) {
       const first = this.replacementOrder.keys().next().value;
       if (first === undefined) break;
-      this.deleteReplacement(first);
+      this.deleteReplacement(first, true);
     }
   }
 
-  private deleteReplacement(replacement: ReplacementOverlay): void {
+  private deleteReplacement(
+    replacement: ReplacementOverlay,
+    removeCachedCandidate: boolean,
+  ): void {
     const location = this.replacementOrder.get(replacement);
     if (!location) return;
     this.replacementOrder.delete(replacement);
+
+    if (removeCachedCandidate) {
+      const cached = this.cache.get(location.folderKey);
+      if (cached) {
+        cached.entries = cached.entries.filter(
+          (entry) => entry.id !== replacement.newEntry.id,
+        );
+      }
+    }
 
     const folderReplacements = this.replacements.get(location.folderKey);
     if (folderReplacements?.get(location.name) !== replacement) return;
@@ -165,7 +177,12 @@ export class ListTtlCache {
     const now = Date.now();
     for (const [name, replacement] of folderReplacements) {
       if (replacement.expiresAt <= now) {
-        this.deleteReplacement(replacement);
+        this.deleteReplacement(replacement, true);
+        if (!reconcile) {
+          merged = merged.filter(
+            (entry) => entry.id !== replacement.newEntry.id,
+          );
+        }
         this.onReplacementExpired({
           folderId: k === "__root__" ? null : Number(k),
           name,
@@ -183,7 +200,7 @@ export class ListTtlCache {
           replacement.oldEntryId !== undefined &&
           rows.some((row) => row.id === replacement.oldEntryId);
         if (hasNewEntry && !hasOldEntry) {
-          this.deleteReplacement(replacement);
+          this.deleteReplacement(replacement, false);
           continue;
         }
       }
