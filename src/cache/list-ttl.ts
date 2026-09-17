@@ -23,7 +23,10 @@ function upstreamCarriesCommittedDescription(
 ): boolean {
   const upstream = rows.find((row) => row.id === replacement.newEntry.id);
   if (!upstream) return false;
-  return (upstream.description ?? null) === (replacement.newEntry.description ?? null);
+  return (
+    (upstream.description ?? null) ===
+    (replacement.newEntry.description ?? null)
+  );
 }
 
 export type ReplacementOverlayExpired = {
