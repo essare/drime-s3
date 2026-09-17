@@ -2,14 +2,21 @@ import { describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { uploadFileViaInternalMultipart } from "../../../src/drime/multipart-upload";
+import {
+  type PartRetryOptions,
+  retryDelayMs,
+  uploadFileViaInternalMultipart,
+} from "../../../src/drime/multipart-upload";
 import type { AppContext } from "../../../src/server-context";
 
 const SIGNED_URL = "https://storage.example/secret-signed-part-url";
 
 type PutResult = Response | Error;
 
-async function runUpload(results: PutResult[]) {
+async function runUpload(
+  results: PutResult[],
+  retryOverrides: PartRetryOptions = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "drime-s3-part-retry-"));
   const tmpPath = join(dir, "part.bin");
   await writeFile(tmpPath, Buffer.from("replay-safe body"));
@@ -66,6 +73,7 @@ async function runUpload(results: PutResult[]) {
         delays.push(ms);
       },
       random: () => 0,
+      ...retryOverrides,
     },
   });
 
@@ -78,6 +86,16 @@ async function runUpload(results: PutResult[]) {
     retries,
     delays,
   };
+}
+
+function serializeErrorChain(error: unknown): string {
+  if (!(error instanceof Error)) return JSON.stringify(error);
+  return JSON.stringify({
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    cause: serializeErrorChain(error.cause),
+  });
 }
 
 function response(status: number, body = ""): Response {
@@ -150,5 +168,58 @@ describe("internal multipart part retries", () => {
     expect(run.putUnsignedUrl).toHaveBeenCalledTimes(5);
     expect(run.complete).not.toHaveBeenCalled();
     expect(run.abort).toHaveBeenCalledTimes(1);
+  });
+
+  test("sanitizes final network exhaustion and clamps attempts to five", async () => {
+    const run = await runUpload(
+      Array.from(
+        { length: 5 },
+        (_, attempt) =>
+          new Error(`attempt ${attempt + 1} failed for ${SIGNED_URL}`),
+      ),
+      { maxAttempts: 99 },
+    );
+
+    let thrown: unknown;
+    try {
+      await run.upload;
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(run.putUnsignedUrl).toHaveBeenCalledTimes(5);
+    expect(run.abort).toHaveBeenCalledTimes(1);
+    expect(serializeErrorChain(thrown)).not.toContain(SIGNED_URL);
+    expect(JSON.stringify(run.retries)).not.toContain(SIGNED_URL);
+  });
+
+  test("uses deterministic exponential delays through the retry path", async () => {
+    const run = await runUpload(
+      [
+        response(502),
+        response(502),
+        response(502),
+        response(502),
+        response(200),
+      ],
+      { random: () => 1 },
+    );
+
+    await expect(run.upload).resolves.toBeDefined();
+    expect(run.delays).toEqual([250, 500, 1_000, 2_000]);
+  });
+
+  test("caps backoff and keeps jitter between fifty and one hundred percent", () => {
+    for (const attempt of [1, 2, 3, 4, 5, 20]) {
+      const fullDelay = retryDelayMs(attempt, () => 1);
+      const halfDelay = retryDelayMs(attempt, () => 0);
+
+      expect(fullDelay).toBeLessThanOrEqual(4_000);
+      expect(halfDelay).toBe(Math.floor(fullDelay * 0.5));
+    }
+
+    expect(retryDelayMs(5, () => 1)).toBe(4_000);
+    expect(retryDelayMs(20, () => 1)).toBe(4_000);
   });
 });

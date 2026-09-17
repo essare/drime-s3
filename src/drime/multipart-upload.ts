@@ -200,7 +200,8 @@ export async function uploadFileViaInternalMultipart(
   };
 }
 
-function retryDelayMs(attempt: number, random: () => number): number {
+/** @internal Exported for deterministic backoff boundary tests. */
+export function retryDelayMs(attempt: number, random: () => number): number {
   const base = Math.min(
     PART_BACKOFF_CAP_MS,
     PART_BACKOFF_BASE_MS * 2 ** (attempt - 1),
@@ -221,10 +222,10 @@ async function uploadPartWithRetry(
   partNumber: number,
   retry: PartRetryOptions = {},
 ): Promise<Response> {
-  const maxAttempts = Math.max(
-    1,
-    Math.floor(retry.maxAttempts ?? PART_MAX_ATTEMPTS),
-  );
+  const requestedAttempts = Math.floor(retry.maxAttempts ?? PART_MAX_ATTEMPTS);
+  const maxAttempts = Number.isFinite(requestedAttempts)
+    ? Math.min(PART_MAX_ATTEMPTS, Math.max(1, requestedAttempts))
+    : PART_MAX_ATTEMPTS;
   const sleep =
     retry.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -242,9 +243,10 @@ async function uploadPartWithRetry(
       });
     } catch (error) {
       if (attempt === maxAttempts) {
+        const sanitizedCause = new Error(retryErrorMessage(error, url));
         throw new Error(
           `Part ${partNumber} upload failed after ${maxAttempts} attempts`,
-          { cause: error },
+          { cause: sanitizedCause },
         );
       }
       ctx.logger.warn(
