@@ -103,11 +103,6 @@ export class ListTtlCache {
       name: newEntry.name,
     });
     this.trimReplacementsIfNeeded();
-
-    const cached = this.cache.get(k);
-    if (!cached) return;
-    cached.entries = this.mergeReplacement(cached.entries, replacement);
-    cached.ts = Date.now();
   }
 
   private trimIfNeeded(): void {
@@ -122,26 +117,14 @@ export class ListTtlCache {
     while (this.replacementOrder.size > MAX_CACHED_KEYS) {
       const first = this.replacementOrder.keys().next().value;
       if (first === undefined) break;
-      this.deleteReplacement(first, true);
+      this.deleteReplacement(first);
     }
   }
 
-  private deleteReplacement(
-    replacement: ReplacementOverlay,
-    removeCachedCandidate: boolean,
-  ): void {
+  private deleteReplacement(replacement: ReplacementOverlay): void {
     const location = this.replacementOrder.get(replacement);
     if (!location) return;
     this.replacementOrder.delete(replacement);
-
-    if (removeCachedCandidate) {
-      const cached = this.cache.get(location.folderKey);
-      if (cached) {
-        cached.entries = cached.entries.filter(
-          (entry) => entry.id !== replacement.newEntry.id,
-        );
-      }
-    }
 
     const folderReplacements = this.replacements.get(location.folderKey);
     if (folderReplacements?.get(location.name) !== replacement) return;
@@ -171,18 +154,13 @@ export class ListTtlCache {
     reconcile: boolean,
   ): FileEntry[] {
     const folderReplacements = this.replacements.get(k);
-    if (!folderReplacements) return rows;
+    if (!folderReplacements) return [...rows];
 
-    let merged = rows;
+    let merged = [...rows];
     const now = Date.now();
     for (const [name, replacement] of folderReplacements) {
       if (replacement.expiresAt <= now) {
-        this.deleteReplacement(replacement, true);
-        if (!reconcile) {
-          merged = merged.filter(
-            (entry) => entry.id !== replacement.newEntry.id,
-          );
-        }
+        this.deleteReplacement(replacement);
         this.onReplacementExpired({
           folderId: k === "__root__" ? null : Number(k),
           name,
@@ -200,7 +178,7 @@ export class ListTtlCache {
           replacement.oldEntryId !== undefined &&
           rows.some((row) => row.id === replacement.oldEntryId);
         if (hasNewEntry && !hasOldEntry) {
-          this.deleteReplacement(replacement, false);
+          this.deleteReplacement(replacement);
           continue;
         }
       }
@@ -225,8 +203,7 @@ export class ListTtlCache {
     const now = Date.now();
     const hit = this.cache.get(k);
     if (hit && now - hit.ts < TTL_MS) {
-      hit.entries = this.applyReplacements(k, hit.entries, false);
-      return hit.entries;
+      return this.applyReplacements(k, hit.entries, false);
     }
 
     let pending = this.inflight.get(k);
@@ -244,8 +221,9 @@ export class ListTtlCache {
   ): Promise<FileEntry[]> {
     return (async () => {
       try {
-        const entries = this.applyReplacements(k, await fetcher(), true);
-        this.cache.set(k, { ts: Date.now(), entries });
+        const rawEntries = await fetcher();
+        const entries = this.applyReplacements(k, rawEntries, true);
+        this.cache.set(k, { ts: Date.now(), entries: rawEntries });
         this.trimIfNeeded();
         return entries;
       } finally {

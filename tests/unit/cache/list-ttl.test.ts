@@ -339,6 +339,35 @@ describe("ListTtlCache replacement overlay", () => {
     }
   });
 
+  test("restores a suppressed raw row when its overlay expires", async () => {
+    const expired: unknown[] = [];
+    const cache = new ListTtlCache((event) => expired.push(event));
+    const oldA = folderEntry(1, "a.bin");
+    const candidateA = folderEntry(2, "a.bin");
+    const candidateB = folderEntry(4, "b.bin");
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      await cache.getOrFetch(7, async () => [oldA]);
+      cache.replaceEntry(7, oldA.id, candidateA);
+
+      now += 59_000;
+      await cache.getOrFetch(7, async () => [oldA]);
+      cache.replaceEntry(7, 3, candidateB);
+      now += 1_000;
+
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        oldA,
+        candidateB,
+      ]);
+      expect(expired).toHaveLength(1);
+      expect(cache.replacementOverlaySize).toBe(1);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test("bounds replacement overlay folder keys", () => {
     const cache = new ListTtlCache();
 
