@@ -30,6 +30,26 @@ const xmlParser = new XMLParser({
   removeNSPrefix: true,
 });
 
+const PLANTED_SECRET = "super-secret-token";
+const HOST = "127.0.0.1:8081";
+const BASE = `http://${HOST}`;
+const H = { Host: HOST };
+
+function capturingLogger(): { logger: pino.Logger; serialized: () => string } {
+  const lines: string[] = [];
+  return {
+    logger: pino(
+      { level: "trace" },
+      {
+        write(line: string) {
+          lines.push(line);
+        },
+      },
+    ),
+    serialized: () => lines.join("\n"),
+  };
+}
+
 describe("CopyObject and batch delete", () => {
   test("CopyObject then GET destination matches source", async () => {
     const mock = await startMockDrime();
@@ -82,6 +102,89 @@ describe("CopyObject and batch delete", () => {
       );
       expect(getB.status).toBe(200);
       expect(await getB.text()).toBe(body);
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("copy overwrite metadata failure preserves dest bytes and omits planted body", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: capture.logger,
+      });
+      const bucket = "copy-overwrite-bucket";
+      await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+      );
+
+      const destPut = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "old-dest-bytes",
+        }),
+      );
+      expect(destPut.status).toBe(200);
+
+      const srcPut = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/src.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "new-src-bytes!",
+        }),
+      );
+      expect(srcPut.status).toBe(200);
+
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.metadataFailureCount = 1;
+
+      const copy = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "x-amz-copy-source": encodeURIComponent(`/${bucket}/src.bin`),
+          },
+        }),
+      );
+      expect(copy.status).toBe(500);
+      const xml = await copy.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Copy failed.");
+      expect(xml).not.toContain(PLANTED_SECRET);
+      expect(xml).not.toContain("forced failure");
+
+      const logs = capture.serialized();
+      expect(logs).not.toContain(PLANTED_SECRET);
+      expect(logs).not.toContain("forced failure");
+
+      const got = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "GET",
+          headers: H,
+        }),
+      );
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-dest-bytes");
     } finally {
       mock.stop();
     }

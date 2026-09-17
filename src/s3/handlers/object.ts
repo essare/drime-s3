@@ -8,6 +8,7 @@ import {
   createAwsChunkedPayloadTransform,
 } from "../../auth/chunked-decoder";
 import { normalizePathKey } from "../../cache/folder-paths";
+import { DrimeApiError } from "../../drime/client";
 import {
   getMultipartPutThresholdBytes,
   uploadFileViaInternalMultipart,
@@ -55,6 +56,20 @@ function replacementStageError(
 ): Response {
   ctx.logger.error({ ...fields, stage: error.stage }, logMessage);
   return xmlErr(500, "InternalError", clientMessage);
+}
+
+/** Stable type + Drime status only. No message, stack, body, cause, tags, or URLs. */
+function safeHandlerErrorFields(error: unknown): {
+  errType: string;
+  drimeStatus?: number;
+} {
+  if (error instanceof DrimeApiError) {
+    return { errType: error.name, drimeStatus: error.status };
+  }
+  if (error instanceof Error && error.name.length > 0) {
+    return { errType: error.name };
+  }
+  return { errType: typeof error };
 }
 
 function formatHttpDate(updatedAt: string | null): string {
@@ -317,7 +332,7 @@ async function handlePutCopyObject(
     }
     ctx.logger.error(
       {
-        err: e,
+        ...safeHandlerErrorFields(e),
         srcBucket: parsed.bucket,
         srcKey: parsed.key,
         destBucket,
@@ -325,13 +340,6 @@ async function handlePutCopyObject(
       },
       "PUT copy object failed",
     );
-    if (ctx.config.insecure && e instanceof Error) {
-      return xmlErr(
-        500,
-        "InternalError",
-        `Copy failed: ${e.message.slice(0, 800)}`,
-      );
-    }
     return xmlErr(500, "InternalError", "Copy failed.");
   } finally {
     if (tmpDir) {
@@ -679,16 +687,15 @@ export async function handleObjectRequest(
         );
       }
       ctx.logger.error(
-        { err: e, bucket, key, parentId, relativePath },
+        {
+          ...safeHandlerErrorFields(e),
+          bucket,
+          key,
+          parentId,
+          relativePath,
+        },
         "PUT object failed",
       );
-      // In insecure (dev) mode, surface the upstream error so the operator can
-      // diagnose without grepping logs. Production callers still see the
-      // generic message to avoid leaking internals.
-      if (ctx.config.insecure && e instanceof Error) {
-        const detail = e.message.slice(0, 800);
-        return xmlErr(500, "InternalError", `Upload failed: ${detail}`);
-      }
       return xmlErr(500, "InternalError", "Upload failed.");
     } finally {
       if (tmpDir) {

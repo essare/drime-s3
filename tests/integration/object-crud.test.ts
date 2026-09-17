@@ -16,6 +16,22 @@ const NEW_BACKUP_MD5 = "d8f9416b74f6ac906038204b79b7022e";
 /** Independent MD5 of `abcdefghijklmnopqrstuvwxyz012345` (Python hashlib). */
 const MULTIPART_BODY_MD5 = "357e82db934fc45f4a25b4b83dc8bd19";
 const MULTIPART_BODY = "abcdefghijklmnopqrstuvwxyz012345";
+const PLANTED_SECRET = "super-secret-token";
+
+function capturingLogger(): { logger: pino.Logger; serialized: () => string } {
+  const lines: string[] = [];
+  return {
+    logger: pino(
+      { level: "trace" },
+      {
+        write(line: string) {
+          lines.push(line);
+        },
+      },
+    ),
+    serialized: () => lines.join("\n"),
+  };
+}
 
 function testConfig(apiBaseUrl: string): AppConfig {
   return {
@@ -301,6 +317,50 @@ describe("Object CRUD", () => {
         "new-backup-v2",
       );
       expect(second.status).toBe(500);
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-backup-v1");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("candidate upload failure omits planted Drime body from S3 response and logs", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: capture.logger,
+      });
+      const bucket = "upload-secret-bucket";
+      await putBucket(ctx, bucket);
+
+      const first = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(first.status).toBe(200);
+
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.uploadFailureCount = 1;
+      const second = await putObject(
+        ctx,
+        bucket,
+        "backup.bin",
+        "new-backup-v2",
+      );
+      expect(second.status).toBe(500);
+      const xml = await second.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Upload failed.");
+      expect(xml).not.toContain(PLANTED_SECRET);
+      expect(xml).not.toContain("forced failure");
+
+      const logs = capture.serialized();
+      expect(logs).not.toContain(PLANTED_SECRET);
+      expect(logs).not.toContain("forced failure");
 
       const got = await getObject(ctx, bucket, "backup.bin");
       expect(got.status).toBe(200);
