@@ -211,6 +211,62 @@ describe("CopyObject and batch delete", () => {
     }
   });
 
+  test("copy upload failure omits planted Drime body from S3 XML and logs", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: capture.logger,
+      });
+      const bucket = "copy-upload-secret-bucket";
+      await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+      );
+      const srcPut = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/src.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "copy-src-bytes",
+        }),
+      );
+      expect(srcPut.status).toBe(200);
+
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.uploadFailureCount = 1;
+
+      const copy = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "x-amz-copy-source": encodeURIComponent(`/${bucket}/src.bin`),
+          },
+        }),
+      );
+      expect(copy.status).toBe(500);
+      const xml = await copy.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Copy failed.");
+      expect(xml).not.toContain(PLANTED_SECRET);
+      expect(xml).not.toContain("forced failure");
+      expect(capture.serialized()).not.toContain(PLANTED_SECRET);
+      expect(capture.serialized()).not.toContain("forced failure");
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("DeleteObjects removes two keys", async () => {
     const mock = await startMockDrime();
     try {

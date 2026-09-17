@@ -392,6 +392,40 @@ describe("Object CRUD", () => {
     }
   });
 
+  test("GET download failure uses static XML and omits planted upstream bodies", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: capture.logger,
+      });
+      const bucket = "get-secret-bucket";
+      await putBucket(ctx, bucket);
+      const put = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(put.status).toBe(200);
+
+      mock.faultBody = JSON.stringify({
+        error: "forced failure",
+        token: PLANTED_SECRET,
+      });
+      mock.downloadFailureCount = 1;
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(500);
+      const xml = await got.text();
+      expect(xml).toContain("DownloadFailed");
+      expect(xml).toContain("Upstream download failed.");
+      expect(xml).not.toContain(PLANTED_SECRET);
+      expect(xml).not.toContain("forced failure");
+      expect(xml).not.toContain("500");
+      expect(capture.serialized()).not.toContain(PLANTED_SECRET);
+      expect(capture.serialized()).not.toContain("forced failure");
+      expect(capture.serialized()).toContain("object download failed");
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("GET remains available for retained exact-name duplicates", async () => {
     const mock = await startMockDrime();
     try {

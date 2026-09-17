@@ -70,6 +70,8 @@ export type StartMockDrimeOptions = {
   listFailureCount?: number;
   /** Remaining forced 500s for POST `/s3/multipart/batch-sign-part-urls`. */
   signPartUrlFailureCount?: number;
+  /** Remaining forced 500s for GET `/file-entries/:id/download`. */
+  downloadFailureCount?: number;
 };
 
 function wrapCreatedEntry(
@@ -232,6 +234,8 @@ export type MockDrimeServer = {
   listFailureCount: number;
   /** Remaining forced 500s for batch-sign-part-urls. */
   signPartUrlFailureCount: number;
+  /** Remaining forced 500s for object downloads. */
+  downloadFailureCount: number;
   /** Every `PUT /mock-multipart-put`, including failed statuses. */
   partPutReceipts: MockPartPutReceipt[];
   /** `POST /s3/multipart/complete` invocations, including 4xx. */
@@ -289,6 +293,7 @@ export async function startMockDrime(
     emptyListingCount: options.emptyListingCount ?? 0,
     listFailureCount: options.listFailureCount ?? 0,
     signPartUrlFailureCount: options.signPartUrlFailureCount ?? 0,
+    downloadFailureCount: options.downloadFailureCount ?? 0,
     partPutReceipts: [],
     multipartCompleteCount: 0,
     snapshotFileEntries() {
@@ -330,7 +335,8 @@ export async function startMockDrime(
       | "metadataFailureCount"
       | "deleteFailureCount"
       | "listFailureCount"
-      | "signPartUrlFailureCount",
+      | "signPartUrlFailureCount"
+      | "downloadFailureCount",
   ): boolean => {
     if (handle[key] > 0) {
       handle[key] -= 1;
@@ -522,6 +528,9 @@ export async function startMockDrime(
 
       const downloadMatch = /^\/file-entries\/(\d+)\/download$/.exec(path);
       if (req.method === "GET" && downloadMatch) {
+        if (takeFault("downloadFailureCount")) {
+          return forcedFailureResponse(handle.faultBody);
+        }
         const id = Number(downloadMatch[1]);
         const bytes = fileBytes.get(id);
         if (bytes === undefined) {

@@ -515,12 +515,12 @@ export async function handleObjectRequest(
       headers: range ? { Range: range } : undefined,
     });
     if (!upstream.ok && upstream.status !== 206) {
-      const t = await upstream.text();
-      return xmlErr(
-        500,
-        "DownloadFailed",
-        `Upstream download failed (${upstream.status}): ${t.slice(0, 200)}`,
+      await upstream.text().catch(() => "");
+      ctx.logger.error(
+        { bucket, key, upstreamStatus: upstream.status },
+        "object download failed",
       );
+      return xmlErr(500, "DownloadFailed", "Upstream download failed.");
     }
 
     const strong = entryHasStrongContentEtag(entry);
