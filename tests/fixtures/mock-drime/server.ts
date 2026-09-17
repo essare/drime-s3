@@ -25,6 +25,18 @@ export type CreatedEntryShape =
   | "data"
   | "direct";
 
+export type MockPartPutReceipt = {
+  partNumber: number;
+  status: number;
+  bytes: number;
+};
+
+export type MockFileEntrySnapshot = {
+  id: number;
+  name: string;
+  file_size: number;
+};
+
 export type StartMockDrimeOptions = {
   /** Workspace id used for seeded folders (default `1`). */
   workspaceId?: number;
@@ -40,6 +52,20 @@ export type StartMockDrimeOptions = {
   faultBody?: string;
   /** Wrapper used for created-file JSON. Default matches current `{ fileEntry }`. */
   createdEntryShape?: CreatedEntryShape;
+  /**
+   * After a live delete, include snapshotted rows in this many subsequent
+   * folder-list responses (Drive eventual consistency).
+   */
+  staleListingsAfterDelete?: number;
+  /** Status codes consumed one-for-one by `PUT /mock-multipart-put`. */
+  partPutStatuses?: number[];
+  /** Remaining deletes that remove the ids then return the production 422 body. */
+  deleteInvalidIdsCount?: number;
+  /**
+   * Remaining folder lists that return 200 with an empty page. Used so
+   * coordinator confirmation stays unresolved without DrimeClient 5xx retries.
+   */
+  emptyListingCount?: number;
 };
 
 function wrapCreatedEntry(
@@ -61,6 +87,12 @@ function wrapCreatedEntry(
 }
 
 const DEFAULT_FAULT_BODY = JSON.stringify({ error: "forced failure" });
+
+/** Exact production body for `POST /file-entries/delete` when ids are already gone. */
+const INVALID_ENTRY_IDS_BODY = JSON.stringify({
+  message: "The selected entry ids is invalid.",
+  errors: { entryIds: ["The selected entry ids is invalid."] },
+});
 
 function forcedFailureResponse(body: string): Response {
   return new Response(body, {
@@ -184,6 +216,20 @@ export type MockDrimeServer = {
   deleteFailureCount: number;
   /** Raw JSON body returned by the next forced 500s. */
   faultBody: string;
+  /** Remaining folder lists that still include snapshotted deleted rows. */
+  staleListingsAfterDelete: number;
+  /** Remaining `/mock-multipart-put` statuses, consumed front-to-back. */
+  partPutStatuses: number[];
+  /** Remaining deletes that apply then return the production invalid-ids 422. */
+  deleteInvalidIdsCount: number;
+  /** Remaining folder lists that return an empty 200 page. */
+  emptyListingCount: number;
+  /** Every `PUT /mock-multipart-put`, including failed statuses. */
+  partPutReceipts: MockPartPutReceipt[];
+  /** `POST /s3/multipart/complete` invocations, including 4xx. */
+  multipartCompleteCount: number;
+  /** Live Drive file rows (not folders, not stale snapshots). */
+  snapshotFileEntries(): MockFileEntrySnapshot[];
 };
 
 /**
@@ -219,6 +265,7 @@ export async function startMockDrime(
 
   const createdEntryShape: CreatedEntryShape =
     options.createdEntryShape ?? "fileEntry";
+  const staleDeleted: Entry[] = [];
   const handle: MockDrimeServer = {
     baseUrl: "",
     stop() {},
@@ -226,6 +273,31 @@ export async function startMockDrime(
     metadataFailureCount: options.metadataFailureCount ?? 0,
     deleteFailureCount: options.deleteFailureCount ?? 0,
     faultBody: options.faultBody ?? DEFAULT_FAULT_BODY,
+    staleListingsAfterDelete: options.staleListingsAfterDelete ?? 0,
+    partPutStatuses: [...(options.partPutStatuses ?? [])],
+    deleteInvalidIdsCount: options.deleteInvalidIdsCount ?? 0,
+    emptyListingCount: options.emptyListingCount ?? 0,
+    partPutReceipts: [],
+    multipartCompleteCount: 0,
+    snapshotFileEntries() {
+      return entries
+        .filter((e) => e.type === "text")
+        .map((e) => ({ id: e.id, name: e.name, file_size: e.file_size }));
+    },
+  };
+
+  const applyDeletes = (ids: Set<number>): void => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const row = entries[i];
+      if (row !== undefined && ids.has(row.id)) {
+        staleDeleted.push({ ...row });
+        if (row.type === "text") {
+          rollupFolderBytes(entries, row.parent_id, -row.file_size);
+        }
+        fileBytes.delete(row.id);
+        entries.splice(i, 1);
+      }
+    }
   };
 
   const takeFault = (
@@ -254,10 +326,23 @@ export async function startMockDrime(
             return new Response("Not Found", { status: 404 });
           }
           const buf = new Uint8Array(await req.arrayBuffer());
+          const queued = handle.partPutStatuses.shift();
+          const status =
+            typeof queued === "number" && Number.isFinite(queued)
+              ? queued
+              : 200;
+          handle.partPutReceipts.push({
+            partNumber: partNum,
+            status,
+            bytes: buf.byteLength,
+          });
+          if (status < 200 || status >= 300) {
+            return new Response("part put failed", { status });
+          }
           state.parts.set(partNum, buf);
           const md5 = createHash("md5").update(buf).digest("hex");
           return new Response("", {
-            status: 200,
+            status,
             headers: { ETag: `"${md5}"` },
           });
         })();
@@ -274,6 +359,10 @@ export async function startMockDrime(
       }
 
       if (req.method === "GET" && path === "/drive/file-entries") {
+        if (handle.emptyListingCount > 0) {
+          handle.emptyListingCount -= 1;
+          return json({ data: [], last_page: 1 });
+        }
         const ws = Number(url.searchParams.get("workspaceId") ?? "0");
         const parentIdsRaw = url.searchParams.get("parentIds");
         const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
@@ -282,12 +371,22 @@ export async function startMockDrime(
           Number(url.searchParams.get("perPage") ?? "100"),
         );
 
-        let rows = entries.filter((e) => e.workspaceId === ws);
-        if (parentIdsRaw === null || parentIdsRaw === "") {
-          rows = rows.filter((e) => e.parent_id === null);
-        } else {
-          const pid = Number(parentIdsRaw);
-          rows = rows.filter((e) => e.parent_id === pid);
+        const matchesParent = (e: Entry): boolean => {
+          if (e.workspaceId !== ws) return false;
+          if (parentIdsRaw === null || parentIdsRaw === "") {
+            return e.parent_id === null;
+          }
+          return e.parent_id === Number(parentIdsRaw);
+        };
+
+        let rows = entries.filter(matchesParent);
+        if (handle.staleListingsAfterDelete > 0 && staleDeleted.length > 0) {
+          const liveIds = new Set(rows.map((e) => e.id));
+          const extra = staleDeleted.filter(
+            (e) => matchesParent(e) && !liveIds.has(e.id),
+          );
+          rows = [...extra, ...rows];
+          handle.staleListingsAfterDelete -= 1;
         }
 
         const total = rows.length;
@@ -420,21 +519,20 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/file-entries/delete") {
         return (async () => {
+          const body = (await req.json()) as { entryIds?: number[] };
+          const ids = new Set(body.entryIds ?? []);
+          if (handle.deleteInvalidIdsCount > 0) {
+            handle.deleteInvalidIdsCount -= 1;
+            applyDeletes(ids);
+            return new Response(INVALID_ENTRY_IDS_BODY, {
+              status: 422,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (takeFault("deleteFailureCount")) {
             return forcedFailureResponse(handle.faultBody);
           }
-          const body = (await req.json()) as { entryIds?: number[] };
-          const ids = new Set(body.entryIds ?? []);
-          for (let i = entries.length - 1; i >= 0; i--) {
-            const row = entries[i];
-            if (row !== undefined && ids.has(row.id)) {
-              if (row.type === "text") {
-                rollupFolderBytes(entries, row.parent_id, -row.file_size);
-              }
-              fileBytes.delete(row.id);
-              entries.splice(i, 1);
-            }
-          }
+          applyDeletes(ids);
           return json({ status: "success" });
         })();
       }
@@ -473,6 +571,7 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/s3/multipart/complete") {
         return (async () => {
+          handle.multipartCompleteCount += 1;
           const body = (await req.json()) as {
             key?: string;
             uploadId?: string;

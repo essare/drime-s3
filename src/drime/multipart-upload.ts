@@ -214,7 +214,8 @@ function retryErrorMessage(error: unknown, signedUrl: string): string {
   return message.replaceAll(signedUrl, "[signed URL omitted]");
 }
 
-async function uploadPartWithRetry(
+/** Replay a buffered part PUT through the bounded retry policy. */
+export async function uploadPartWithRetry(
   ctx: AppContext,
   url: string,
   body: Buffer<ArrayBuffer>,
@@ -263,11 +264,9 @@ async function uploadPartWithRetry(
 
     if (upstream.ok) return upstream;
 
-    const responseBody = await upstream.text().catch(() => "");
+    await upstream.text().catch(() => "");
     if (!RETRYABLE_PART_STATUSES.has(upstream.status)) {
-      throw new Error(
-        `Part ${partNumber} upload failed (${upstream.status}): ${responseBody.slice(0, 200)}`,
-      );
+      throw new Error(`Part ${partNumber} upload failed (${upstream.status})`);
     }
     if (attempt === maxAttempts) {
       throw new Error(

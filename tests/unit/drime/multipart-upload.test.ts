@@ -152,11 +152,22 @@ describe("internal multipart part retries", () => {
   test("does not retry a non-transient response", async () => {
     const run = await runUpload([response(400, "bad request")]);
 
-    await expect(run.upload).rejects.toThrow(
-      "Part 1 upload failed (400): bad request",
-    );
+    await expect(run.upload).rejects.toThrow("Part 1 upload failed (400)");
     expect(run.putUnsignedUrl).toHaveBeenCalledTimes(1);
     expect(run.complete).not.toHaveBeenCalled();
+  });
+
+  test("does not embed upstream response bodies in thrown part errors", async () => {
+    const run = await runUpload([response(400, "planted-upstream-body")]);
+
+    let thrown: unknown;
+    try {
+      await run.upload;
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(serializeErrorChain(thrown)).not.toContain("planted-upstream-body");
   });
 
   test("aborts once after five exhausted attempts", async () => {
