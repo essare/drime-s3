@@ -417,6 +417,35 @@ export async function handleMultipartRequest(
       return xmlErr(500, "InternalError", "Multipart complete failed.");
     }
 
+    const failAfterUpstreamComplete = (
+      error: unknown,
+      logMessage: string,
+    ): Response => {
+      ctx.multipartStore.delete(uploadIdParam);
+      if (error instanceof ObjectReplacementError) {
+        ctx.logger.error(
+          {
+            bucket,
+            key: session.key,
+            parentId: session.parentId,
+            stage: error.stage,
+          },
+          logMessage,
+        );
+      } else {
+        ctx.logger.error(
+          {
+            ...safeHandlerErrorFields(error),
+            bucket,
+            key: session.key,
+            parentId: session.parentId,
+          },
+          logMessage,
+        );
+      }
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
+    };
+
     const trimmed = session.key.replace(/^\/+|\/+$/g, "");
     const filename = trimmed.includes("/")
       ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
@@ -452,11 +481,7 @@ export async function handleMultipartRequest(
         session.key,
       );
     } catch (e) {
-      ctx.logger.error(
-        { ...safeHandlerErrorFields(e), bucket, key: session.key },
-        "multipart complete resolve failed",
-      );
-      return xmlErr(500, "InternalError", "Multipart complete failed.");
+      return failAfterUpstreamComplete(e, "multipart complete resolve failed");
     }
 
     const entryPayload: Record<string, unknown> = {
@@ -476,11 +501,7 @@ export async function handleMultipartRequest(
     try {
       entryRaw = await ctx.drime.s3CreateEntry(entryPayload);
     } catch (e) {
-      ctx.logger.error(
-        { ...safeHandlerErrorFields(e), bucket, key: session.key },
-        "s3/entries after multipart failed",
-      );
-      return xmlErr(500, "InternalError", "Multipart complete failed.");
+      return failAfterUpstreamComplete(e, "s3/entries after multipart failed");
     }
 
     try {
@@ -501,28 +522,10 @@ export async function handleMultipartRequest(
         tagging: null,
       });
     } catch (e) {
-      if (e instanceof ObjectReplacementError) {
-        ctx.logger.error(
-          {
-            bucket,
-            key: session.key,
-            parentId: session.parentId,
-            stage: e.stage,
-          },
-          "multipart complete replacement failed",
-        );
-        return xmlErr(500, "InternalError", "Multipart complete failed.");
-      }
-      ctx.logger.error(
-        {
-          ...safeHandlerErrorFields(e),
-          bucket,
-          key: session.key,
-          parentId: session.parentId,
-        },
+      return failAfterUpstreamComplete(
+        e,
         "multipart complete replacement failed",
       );
-      return xmlErr(500, "InternalError", "Multipart complete failed.");
     }
 
     ctx.multipartStore.delete(uploadIdParam);

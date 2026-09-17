@@ -576,6 +576,86 @@ describe("S3 multipart upload", () => {
     }
   });
 
+  test("post-complete coordinator failure drops the session so retry is NoSuchUpload", async () => {
+    const { mock, ctx } = await seedBucketWithOldObject(
+      {},
+      "mp-complete-restart-bucket",
+      "backup.bin",
+    );
+    try {
+      mock.metadataFailureCount = 1;
+      const { uploadId, etag1, etag2 } = await uploadTwoParts(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+      );
+      const parts = [
+        { partNumber: 1, etag: etag1 },
+        { partNumber: 2, etag: etag2 },
+      ];
+      const first = await completeMultipart(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+        uploadId,
+        parts,
+      );
+      expect(first.status).toBe(500);
+      expect(await first.text()).toContain("InternalError");
+      expect(mock.multipartCompleteCount).toBe(1);
+
+      const retry = await completeMultipart(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+        uploadId,
+        parts,
+      );
+      expect(retry.status).toBe(404);
+      expect(await retry.text()).toContain("NoSuchUpload");
+      expect(mock.multipartCompleteCount).toBe(1);
+
+      const preserved = await getObject(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+      );
+      expect(preserved.status).toBe(200);
+      expect(await preserved.text()).toBe("old-backup-v1");
+
+      const {
+        uploadId: freshId,
+        etag1: e1,
+        etag2: e2,
+      } = await uploadTwoParts(ctx, "mp-complete-restart-bucket", "backup.bin");
+      const fresh = await completeMultipart(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+        freshId,
+        [
+          { partNumber: 1, etag: e1 },
+          { partNumber: 2, etag: e2 },
+        ],
+      );
+      expect(fresh.status).toBe(200);
+      expect(parseCompleteEtag(await fresh.text())).toBe(TWO_PART_COMPOSITE);
+      const got = await getObject(
+        ctx,
+        "mp-complete-restart-bucket",
+        "backup.bin",
+      );
+      expect(got.status).toBe(200);
+      expect(
+        Buffer.from(await got.arrayBuffer()).equals(
+          Buffer.concat([PART_A, PART_B]),
+        ),
+      ).toBe(true);
+    } finally {
+      mock.stop();
+    }
+  });
+
   test("422 whose listing shows candidate present and old absent still commits", async () => {
     const { mock, ctx, oldId } = await seedBucketWithOldObject(
       {},
@@ -665,10 +745,32 @@ describe("S3 multipart upload", () => {
         .filter((e) => e.name === "backup.bin");
       expect(live.map((e) => e.id)).toContain(oldId);
       expect(live.length).toBe(2);
+      const retainedIds = live.map((e) => e.id);
 
       const got = await getObject(ctx, "mp-unresolved-bucket", "backup.bin");
       expect(got.status).toBe(200);
       expect(await got.text()).toBe("old-backup-v1");
+
+      const retry = await completeMultipart(
+        ctx,
+        "mp-unresolved-bucket",
+        "backup.bin",
+        uploadId,
+        [
+          { partNumber: 1, etag: etag1 },
+          { partNumber: 2, etag: etag2 },
+        ],
+      );
+      expect(retry.status).toBe(404);
+      expect(await retry.text()).toContain("NoSuchUpload");
+      expect(mock.multipartCompleteCount).toBe(1);
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([...retainedIds].sort());
     } finally {
       mock.stop();
     }
