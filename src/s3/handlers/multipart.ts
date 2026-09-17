@@ -404,6 +404,58 @@ export async function handleMultipartRequest(
       }),
     };
 
+    const trimmed = session.key.replace(/^\/+|\/+$/g, "");
+    const filename = trimmed.includes("/")
+      ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
+      : trimmed;
+    const extension = filename.includes(".")
+      ? filename.slice(filename.lastIndexOf(".") + 1)
+      : "";
+    let finalSize = 0;
+    for (const p of xmlParts) {
+      const rec = byPart.get(p.partNumber);
+      if (rec) finalSize += rec.size;
+    }
+    if (finalSize === 0 && session.parts.length > 0) {
+      finalSize = session.parts.reduce((a, p) => a + p.size, 0);
+    }
+
+    const etagsOrdered = sortedParts.map((xp) => {
+      const rec = byPart.get(xp.partNumber);
+      return rec?.etag ?? xp.etag;
+    });
+    const etagOut =
+      etagsOrdered.length > 0
+        ? compositeMultipartEtag(etagsOrdered)
+        : '"complete"';
+
+    let existing: Awaited<ReturnType<typeof resolveObjectKey>>;
+    try {
+      existing = await resolveObjectKey(
+        ctx,
+        W,
+        bucketRootId,
+        bucket,
+        session.key,
+      );
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), bucket, key: session.key },
+        "multipart complete resolve failed",
+      );
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
+    }
+    if (existing.kind === "ambiguous") {
+      await ctx.drime
+        .s3MultipartAbort({
+          key: session.drimeKey,
+          uploadId: session.drimeUid,
+        })
+        .catch(() => {});
+      ctx.multipartStore.delete(uploadIdParam);
+      return ambiguousMutationError(ctx, bucket, session.key, existing);
+    }
+
     try {
       await ctx.drime.s3MultipartComplete(completePayload);
     } catch (e) {
@@ -445,48 +497,6 @@ export async function handleMultipartRequest(
       }
       return xmlErr(500, "InternalError", "Multipart complete failed.");
     };
-
-    const trimmed = session.key.replace(/^\/+|\/+$/g, "");
-    const filename = trimmed.includes("/")
-      ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
-      : trimmed;
-    const extension = filename.includes(".")
-      ? filename.slice(filename.lastIndexOf(".") + 1)
-      : "";
-    let finalSize = 0;
-    for (const p of xmlParts) {
-      const rec = byPart.get(p.partNumber);
-      if (rec) finalSize += rec.size;
-    }
-    if (finalSize === 0 && session.parts.length > 0) {
-      finalSize = session.parts.reduce((a, p) => a + p.size, 0);
-    }
-
-    const etagsOrdered = sortedParts.map((xp) => {
-      const rec = byPart.get(xp.partNumber);
-      return rec?.etag ?? xp.etag;
-    });
-    const etagOut =
-      etagsOrdered.length > 0
-        ? compositeMultipartEtag(etagsOrdered)
-        : '"complete"';
-
-    let existing: Awaited<ReturnType<typeof resolveObjectKey>>;
-    try {
-      existing = await resolveObjectKey(
-        ctx,
-        W,
-        bucketRootId,
-        bucket,
-        session.key,
-      );
-    } catch (e) {
-      return failAfterUpstreamComplete(e, "multipart complete resolve failed");
-    }
-    if (existing.kind === "ambiguous") {
-      ctx.multipartStore.delete(uploadIdParam);
-      return ambiguousMutationError(ctx, bucket, session.key, existing);
-    }
 
     const entryPayload: Record<string, unknown> = {
       clientMime: "application/octet-stream",

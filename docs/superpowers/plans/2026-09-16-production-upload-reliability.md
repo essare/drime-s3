@@ -630,7 +630,6 @@ git commit -m "fix(s3): commit object replacements create-first"
 
 ```typescript
 export type MultipartUploadResult = {
-  transportEtag: string;
   size: number;
   entryRaw: unknown;
 };
@@ -666,12 +665,10 @@ internal multipart returns a composite ETag.
 - [ ] **Step 3: Return raw candidate data from internal multipart**
 
 In `uploadFileViaInternalMultipart`, stop parsing or deciding the externally
-visible ETag. Return the transport composite only for diagnostics plus the raw
-`s3CreateEntry` response:
+visible ETag. Return the raw `s3CreateEntry` response and stored size:
 
 ```typescript
 return {
-  transportEtag: compositeMultipartEtag(partEtags),
   size: opts.totalSize,
   entryRaw,
 };

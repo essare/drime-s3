@@ -4,7 +4,6 @@ import { ListTtlCache } from "../../../src/cache/list-ttl";
 import type { FileEntry } from "../../../src/drime/types";
 import {
   ambiguousMutationError,
-  mutationTargetFromResolved,
   readableObjectEntry,
   resolveObjectKey,
 } from "../../../src/s3/handlers/object-resolve";
@@ -93,21 +92,6 @@ describe("resolveObjectKey duplicates", () => {
       leafName: "backup.bin",
     });
     expect(readable?.entry.id).toBe(11);
-  });
-
-  test("mutationTargetFromResolved refuses an arbitrary duplicate", () => {
-    const target = mutationTargetFromResolved({
-      kind: "ambiguous",
-      entries: [fileEntry(11, "backup.bin"), fileEntry(22, "backup.bin")],
-      parentFolderId: 7,
-      leafName: "backup.bin",
-    });
-    expect(target).toEqual({
-      kind: "ambiguous",
-      parentFolderId: 7,
-      leafName: "backup.bin",
-      entryIds: [11, 22],
-    });
   });
 
   test("ambiguousMutationError is static InternalError with safe log fields", async () => {

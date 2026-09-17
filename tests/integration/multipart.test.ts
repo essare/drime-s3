@@ -1101,7 +1101,14 @@ describe("S3 multipart upload", () => {
       expect(xml).toContain("InternalError");
       expect(xml).toContain("Object key is ambiguous.");
       expect(xml).not.toContain("CompleteMultipartUploadResult");
-      expect(mock.multipartCompleteCount).toBe(1);
+      expect(mock.multipartCompleteCount).toBe(0);
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
 
       const retry = await completeMultipart(
         ctx,
@@ -1115,7 +1122,26 @@ describe("S3 multipart upload", () => {
       );
       expect(retry.status).toBe(404);
       expect(await retry.text()).toContain("NoSuchUpload");
-      expect(mock.multipartCompleteCount).toBe(1);
+      expect(mock.multipartCompleteCount).toBe(0);
+
+      const {
+        uploadId: freshId,
+        etag1: e1,
+        etag2: e2,
+      } = await uploadTwoParts(ctx, "mp-dup-complete-bucket", "backup.bin");
+      const fresh = await completeMultipart(
+        ctx,
+        "mp-dup-complete-bucket",
+        "backup.bin",
+        freshId,
+        [
+          { partNumber: 1, etag: e1 },
+          { partNumber: 2, etag: e2 },
+        ],
+      );
+      expect(fresh.status).toBe(500);
+      expect(await fresh.text()).toContain("Object key is ambiguous.");
+      expect(mock.multipartCompleteCount).toBe(0);
       expect(
         mock
           .snapshotFileEntries()

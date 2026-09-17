@@ -15,16 +15,6 @@ export type KeyResolve =
   | { kind: "missing_prefix"; leafName: string }
   | { kind: "missing_file"; parentFolderId: number; leafName: string };
 
-export type MutationTarget =
-  | { kind: "missing" }
-  | { kind: "unique"; entry: FileEntry; parentFolderId: number }
-  | {
-      kind: "ambiguous";
-      parentFolderId: number;
-      leafName: string;
-      entryIds: number[];
-    };
-
 export function readableObjectEntry(
   resolved: KeyResolve,
 ): { entry: FileEntry; parentFolderId: number } | undefined {
@@ -37,27 +27,6 @@ export function readableObjectEntry(
     return { entry, parentFolderId: resolved.parentFolderId };
   }
   return undefined;
-}
-
-export function mutationTargetFromResolved(
-  resolved: KeyResolve,
-): MutationTarget {
-  if (resolved.kind === "ambiguous") {
-    return {
-      kind: "ambiguous",
-      parentFolderId: resolved.parentFolderId,
-      leafName: resolved.leafName,
-      entryIds: resolved.entries.map((entry) => entry.id),
-    };
-  }
-  if (resolved.kind === "file" || resolved.kind === "folder") {
-    return {
-      kind: "unique",
-      entry: resolved.entry,
-      parentFolderId: resolved.parentFolderId,
-    };
-  }
-  return { kind: "missing" };
 }
 
 export function logAmbiguousObjectKey(
