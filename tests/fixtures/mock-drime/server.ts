@@ -238,6 +238,8 @@ export type MockDrimeServer = {
   multipartCompleteCount: number;
   /** Live Drive file rows (not folders, not stale snapshots). */
   snapshotFileEntries(): MockFileEntrySnapshot[];
+  /** Clone a live file row under the same parent and exact name. */
+  cloneFileById(id: number): number | undefined;
 };
 
 /**
@@ -293,6 +295,18 @@ export async function startMockDrime(
       return entries
         .filter((e) => e.type === "text")
         .map((e) => ({ id: e.id, name: e.name, file_size: e.file_size }));
+    },
+    cloneFileById(id: number) {
+      const row = entries.find((e) => e.id === id && e.type === "text");
+      if (!row) return undefined;
+      const bytes = fileBytes.get(id);
+      if (!bytes) return undefined;
+      const cloneId = nextId++;
+      const clone: Entry = { ...row, id: cloneId };
+      entries.push(clone);
+      fileBytes.set(cloneId, new Uint8Array(bytes));
+      rollupFolderBytes(entries, clone.parent_id, clone.file_size);
+      return cloneId;
     },
   };
 

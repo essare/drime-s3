@@ -3,7 +3,10 @@ import pino from "pino";
 import type { AppConfig } from "../../src/config";
 import { dispatch } from "../../src/s3/router";
 import { type AppContext, createAppContext } from "../../src/server-context";
-import { startMockDrime } from "../fixtures/mock-drime/server";
+import {
+  type MockDrimeServer,
+  startMockDrime,
+} from "../fixtures/mock-drime/server";
 
 const HOST = "127.0.0.1:8081";
 const BASE = `http://${HOST}`;
@@ -105,6 +108,25 @@ async function headObject(
     ctx,
     new Request(`${BASE}/${bucket}/${key}`, { method: "HEAD", headers: H }),
   );
+}
+
+async function duplicateExactName(
+  ctx: AppContext,
+  mock: MockDrimeServer,
+  bucket: string,
+  key: string,
+): Promise<{ originalId: number; cloneId: number }> {
+  const name = key.includes("/") ? key.slice(key.lastIndexOf("/") + 1) : key;
+  const original = mock.snapshotFileEntries().find((e) => e.name === name);
+  expect(original).toBeDefined();
+  const cloneId = mock.cloneFileById(original?.id ?? 0);
+  expect(cloneId).toBeDefined();
+  const ws = ctx.gatewayWorkspaceId ?? 1;
+  const roots = await ctx.drime.listFolder(null, ws);
+  const bucketFolder = roots.find((e) => e.is_folder && e.name === bucket);
+  expect(bucketFolder).toBeDefined();
+  ctx.listCache.invalidate(bucketFolder?.id ?? 0);
+  return { originalId: original?.id ?? 0, cloneId: cloneId ?? 0 };
 }
 
 describe("Object CRUD", () => {
@@ -365,6 +387,110 @@ describe("Object CRUD", () => {
       const got = await getObject(ctx, bucket, "backup.bin");
       expect(got.status).toBe(200);
       expect(await got.text()).toBe("old-backup-v1");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("GET remains available for retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "dup-get-bucket";
+      await putBucket(ctx, bucket);
+      const put = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(put.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "backup.bin");
+
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-backup-v1");
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("PUT overwrite rejects retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    const capture = capturingLogger();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: capture.logger,
+      });
+      const bucket = "dup-put-bucket";
+      await putBucket(ctx, bucket);
+      const put = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(put.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "backup.bin");
+
+      const second = await putObject(
+        ctx,
+        bucket,
+        "backup.bin",
+        "new-backup-v2",
+      );
+      expect(second.status).toBe(500);
+      const xml = await second.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Object key is ambiguous.");
+      expect(xml).not.toContain(String(ids.originalId));
+      expect(xml).not.toContain(String(ids.cloneId));
+      expect(capture.serialized()).toContain("ambiguous_object_key");
+      expect(capture.serialized()).toContain(String(ids.originalId));
+      expect(capture.serialized()).toContain(String(ids.cloneId));
+
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
+      const got = await getObject(ctx, bucket, "backup.bin");
+      expect(got.status).toBe(200);
+      expect(await got.text()).toBe("old-backup-v1");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("DELETE rejects retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createCtx(mock.baseUrl);
+      const bucket = "dup-del-bucket";
+      await putBucket(ctx, bucket);
+      const put = await putObject(ctx, bucket, "backup.bin", "old-backup-v1");
+      expect(put.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "backup.bin");
+
+      const del = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/backup.bin`, {
+          method: "DELETE",
+          headers: H,
+        }),
+      );
+      expect(del.status).toBe(500);
+      const xml = await del.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Object key is ambiguous.");
+
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
     } finally {
       mock.stop();
     }

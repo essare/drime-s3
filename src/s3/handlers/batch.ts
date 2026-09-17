@@ -5,7 +5,7 @@ import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
 import { deleteResultXml } from "../xml";
 import { findRootFolder } from "./bucket";
-import { resolveObjectKey } from "./object-resolve";
+import { logAmbiguousObjectKey, resolveObjectKey } from "./object-resolve";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -109,6 +109,15 @@ export async function handleDeleteObjects(
       );
       if (r.kind === "missing_prefix" || r.kind === "missing_file") {
         deleted.push({ Key: objectKey });
+        return;
+      }
+      if (r.kind === "ambiguous") {
+        logAmbiguousObjectKey(ctx, bucket, objectKey, r);
+        errors.push({
+          Key: objectKey,
+          Code: "InternalError",
+          Message: "Object key is ambiguous.",
+        });
         return;
       }
       toDelete.push({

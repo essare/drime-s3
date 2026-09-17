@@ -297,6 +297,24 @@ async function seedBucketWithOldObject(
   return { mock, ctx, capture, oldId: old?.id ?? 0 };
 }
 
+async function duplicateExactName(
+  ctx: AppContext,
+  mock: MockDrimeServer,
+  bucket: string,
+  key: string,
+): Promise<{ originalId: number; cloneId: number }> {
+  const original = mock.snapshotFileEntries().find((e) => e.name === key);
+  expect(original).toBeDefined();
+  const cloneId = mock.cloneFileById(original?.id ?? 0);
+  expect(cloneId).toBeDefined();
+  const ws = ctx.gatewayWorkspaceId ?? 1;
+  const roots = await ctx.drime.listFolder(null, ws);
+  const bucketFolder = roots.find((e) => e.is_folder && e.name === bucket);
+  expect(bucketFolder).toBeDefined();
+  ctx.listCache.invalidate(bucketFolder?.id ?? 0);
+  return { originalId: original?.id ?? 0, cloneId: cloneId ?? 0 };
+}
+
 describe("S3 multipart upload", () => {
   test("POST uploads → PUT part → POST complete → GET object", async () => {
     const mock = await startMockDrime({ seedRootFolders: ["mp-bucket"] });
@@ -1044,6 +1062,67 @@ describe("S3 multipart upload", () => {
       expect(xml).toContain("InternalError");
       expect(xml).toContain("Multipart complete failed.");
       assertOmitsPlanted(xml, capture.serialized());
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("Complete replacement rejects retained exact-name duplicates", async () => {
+    const { mock, ctx, oldId } = await seedBucketWithOldObject(
+      {},
+      "mp-dup-complete-bucket",
+      "backup.bin",
+    );
+    try {
+      const ids = await duplicateExactName(
+        ctx,
+        mock,
+        "mp-dup-complete-bucket",
+        "backup.bin",
+      );
+      expect(ids.originalId).toBe(oldId);
+      const { uploadId, etag1, etag2 } = await uploadTwoParts(
+        ctx,
+        "mp-dup-complete-bucket",
+        "backup.bin",
+      );
+      const complete = await completeMultipart(
+        ctx,
+        "mp-dup-complete-bucket",
+        "backup.bin",
+        uploadId,
+        [
+          { partNumber: 1, etag: etag1 },
+          { partNumber: 2, etag: etag2 },
+        ],
+      );
+      expect(complete.status).toBe(500);
+      const xml = await complete.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Object key is ambiguous.");
+      expect(xml).not.toContain("CompleteMultipartUploadResult");
+      expect(mock.multipartCompleteCount).toBe(1);
+
+      const retry = await completeMultipart(
+        ctx,
+        "mp-dup-complete-bucket",
+        "backup.bin",
+        uploadId,
+        [
+          { partNumber: 1, etag: etag1 },
+          { partNumber: 2, etag: etag2 },
+        ],
+      );
+      expect(retry.status).toBe(404);
+      expect(await retry.text()).toContain("NoSuchUpload");
+      expect(mock.multipartCompleteCount).toBe(1);
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "backup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
     } finally {
       mock.stop();
     }

@@ -25,7 +25,7 @@ import {
 } from "../xml";
 import { findRootFolder } from "./bucket";
 import { ensureParentFolderForPut } from "./object";
-import { resolveObjectKey } from "./object-resolve";
+import { ambiguousMutationError, resolveObjectKey } from "./object-resolve";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -482,6 +482,10 @@ export async function handleMultipartRequest(
       );
     } catch (e) {
       return failAfterUpstreamComplete(e, "multipart complete resolve failed");
+    }
+    if (existing.kind === "ambiguous") {
+      ctx.multipartStore.delete(uploadIdParam);
+      return ambiguousMutationError(ctx, bucket, session.key, existing);
     }
 
     const entryPayload: Record<string, unknown> = {

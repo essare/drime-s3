@@ -4,7 +4,10 @@ import pino from "pino";
 import type { AppConfig } from "../../src/config";
 import { dispatch } from "../../src/s3/router";
 import { createAppContext } from "../../src/server-context";
-import { startMockDrime } from "../fixtures/mock-drime/server";
+import {
+  type MockDrimeServer,
+  startMockDrime,
+} from "../fixtures/mock-drime/server";
 
 function testConfig(apiBaseUrl: string): AppConfig {
   return {
@@ -48,6 +51,24 @@ function capturingLogger(): { logger: pino.Logger; serialized: () => string } {
     ),
     serialized: () => lines.join("\n"),
   };
+}
+
+async function duplicateExactName(
+  ctx: Awaited<ReturnType<typeof createAppContext>>,
+  mock: MockDrimeServer,
+  bucket: string,
+  key: string,
+): Promise<{ originalId: number; cloneId: number }> {
+  const original = mock.snapshotFileEntries().find((e) => e.name === key);
+  expect(original).toBeDefined();
+  const cloneId = mock.cloneFileById(original?.id ?? 0);
+  expect(cloneId).toBeDefined();
+  const ws = ctx.gatewayWorkspaceId ?? 1;
+  const roots = await ctx.drime.listFolder(null, ws);
+  const bucketFolder = roots.find((e) => e.is_folder && e.name === bucket);
+  expect(bucketFolder).toBeDefined();
+  ctx.listCache.invalidate(bucketFolder?.id ?? 0);
+  return { originalId: original?.id ?? 0, cloneId: cloneId ?? 0 };
 }
 
 describe("CopyObject and batch delete", () => {
@@ -253,6 +274,127 @@ describe("CopyObject and batch delete", () => {
       mock.stop();
     }
   });
+
+  test("copy destination overwrite rejects retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const bucket = "dup-copy-bucket";
+      await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+      );
+      const destPut = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "old-dest-bytes",
+        }),
+      );
+      expect(destPut.status).toBe(200);
+      const srcPut = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/src.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "new-src-bytes!",
+        }),
+      );
+      expect(srcPut.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "dest.bin");
+
+      const copy = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dest.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "x-amz-copy-source": encodeURIComponent(`/${bucket}/src.bin`),
+          },
+        }),
+      );
+      expect(copy.status).toBe(500);
+      const xml = await copy.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Object key is ambiguous.");
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "dest.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("DeleteObjects rejects a key with retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const bucket = "dup-batch-del-bucket";
+      await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+      );
+      const put = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/dup.bin`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "3",
+          },
+          body: "old",
+        }),
+      );
+      expect(put.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "dup.bin");
+
+      const delRes = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}?delete`, {
+          method: "POST",
+          headers: { ...H, "Content-Type": "application/xml" },
+          body: `<?xml version="1.0" encoding="UTF-8"?>
+<Delete>
+  <Object><Key>dup.bin</Key></Object>
+</Delete>`,
+        }),
+      );
+      expect(delRes.status).toBe(200);
+      const xml = await delRes.text();
+      expect(xml).toContain("InternalError");
+      expect(xml).toContain("Object key is ambiguous.");
+      expect(xml).not.toContain("<Deleted>");
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "dup.bin")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
+    } finally {
+      mock.stop();
+    }
+  });
 });
 
 describe("Object tagging", () => {
@@ -299,6 +441,72 @@ describe("Object tagging", () => {
       expect(tagXml).toContain("corgi");
       expect(tagXml).toContain("age");
       expect(tagXml).toContain("2");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("PUT tagging overwrite rejects retained exact-name duplicates", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const bucket = "dup-tag-bucket";
+      await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}`, { method: "PUT", headers: H }),
+      );
+      const put = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/tagged.txt`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "3",
+            "x-amz-tagging": "breed=corgi",
+          },
+          body: "hey",
+        }),
+      );
+      expect(put.status).toBe(200);
+      const ids = await duplicateExactName(ctx, mock, bucket, "tagged.txt");
+
+      const tagged = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/tagged.txt`, {
+          method: "PUT",
+          headers: {
+            ...H,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "3",
+            "x-amz-tagging": "breed=lab",
+          },
+          body: "hey",
+        }),
+      );
+      expect(tagged.status).toBe(500);
+      const xml = await tagged.text();
+      expect(xml).toContain("Object key is ambiguous.");
+      expect(
+        mock
+          .snapshotFileEntries()
+          .filter((e) => e.name === "tagged.txt")
+          .map((e) => e.id)
+          .sort(),
+      ).toEqual([ids.originalId, ids.cloneId].sort());
+
+      const tagRes = await dispatch(
+        ctx,
+        new Request(`${BASE}/${bucket}/tagged.txt?tagging`, {
+          method: "GET",
+          headers: H,
+        }),
+      );
+      expect(tagRes.status).toBe(200);
+      expect(await tagRes.text()).toContain("corgi");
     } finally {
       mock.stop();
     }

@@ -29,7 +29,11 @@ import {
 } from "../tagging";
 import { copyObjectResultXml } from "../xml";
 import { findRootFolder, parseCreateFolderResponse } from "./bucket";
-import { resolveObjectKey } from "./object-resolve";
+import {
+  ambiguousMutationError,
+  readableObjectEntry,
+  resolveObjectKey,
+} from "./object-resolve";
 
 function xmlErr(status: number, code: string, message: string): Response {
   return new Response(s3ErrorXml(code, message), {
@@ -233,10 +237,11 @@ async function handlePutCopyObject(
     parsed.bucket,
     parsed.key,
   );
-  if (srcResolved.kind !== "file") {
+  const srcReadable = readableObjectEntry(srcResolved);
+  if (!srcReadable || srcReadable.entry.is_folder) {
     return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
   }
-  const srcEntry = srcResolved.entry;
+  const srcEntry = srcReadable.entry;
   const downloadUrl = resolveDownloadUrl(srcEntry, ctx);
   const upstream = await ctx.drime.fetchAuthenticated(downloadUrl, {
     method: "GET",
@@ -438,15 +443,19 @@ export async function handleObjectRequest(
 
   const resolved = await resolveObjectKey(ctx, W, bucketRootId, bucket, key);
 
+  if (
+    (method === "PUT" || method === "DELETE") &&
+    resolved.kind === "ambiguous"
+  ) {
+    return ambiguousMutationError(ctx, bucket, key, resolved);
+  }
+
   if (method === "GET" && url.searchParams.has("tagging")) {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file" ||
-      resolved.kind === "folder"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable || readable.entry.is_folder) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    const xml = objectTaggingXml(parseTaggingLine(resolved.entry.description));
+    const xml = objectTaggingXml(parseTaggingLine(readable.entry.description));
     return new Response(xml, {
       status: 200,
       headers: { "Content-Type": "application/xml" },
@@ -454,14 +463,11 @@ export async function handleObjectRequest(
   }
 
   if (method === "HEAD") {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file" ||
-      resolved.kind === "folder"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable || readable.entry.is_folder) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    const { entry } = resolved;
+    const { entry } = readable;
     const downloadUrl = resolveDownloadUrl(entry, ctx);
     let etag = etagFromFileEntry(entry);
     if (
@@ -490,20 +496,18 @@ export async function handleObjectRequest(
   }
 
   if (method === "GET") {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    if (resolved.kind === "folder") {
+    if (readable.entry.is_folder) {
       return xmlErr(
         400,
         "InvalidRequest",
         "Cannot download folder as an object.",
       );
     }
-    const { entry } = resolved;
+    const { entry } = readable;
     const downloadUrl = resolveDownloadUrl(entry, ctx);
     const range = req.headers.get("Range");
     const upstream = await ctx.drime.fetchAuthenticated(downloadUrl, {
@@ -559,6 +563,9 @@ export async function handleObjectRequest(
       resolved.kind === "missing_file"
     ) {
       return new Response(null, { status: 204 });
+    }
+    if (resolved.kind !== "file" && resolved.kind !== "folder") {
+      return xmlErr(500, "InternalError", "Delete failed.");
     }
     try {
       await ctx.drime.deleteEntriesForever([resolved.entry.id]);
