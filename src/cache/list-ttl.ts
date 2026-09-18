@@ -198,17 +198,6 @@ export class ListTtlCache {
     let merged = [...rows];
     const now = Date.now();
     for (const [name, replacement] of folderReplacements) {
-      if (replacement.expiresAt <= now) {
-        this.deleteReplacement(replacement);
-        this.onReplacementExpired({
-          folderId: k === "__root__" ? null : Number(k),
-          name,
-          oldEntryId: replacement.oldEntryId,
-          newEntryId: replacement.newEntry.id,
-        });
-        continue;
-      }
-
       if (reconcile) {
         const hasNewEntry = rows.some(
           (row) => row.id === replacement.newEntry.id,
@@ -231,6 +220,29 @@ export class ListTtlCache {
           this.deleteReplacement(replacement);
           continue;
         }
+      }
+
+      /**
+       * Soft TTL: do not drop the overlay when the window elapses while LIST
+       * still omits the committed description (common for hours on cold
+       * re-LIST). Extend the window and warn so a long sync / cold re-sync
+       * keeps the ETag rclone already verified.
+       */
+      if (replacement.expiresAt <= now) {
+        if (
+          reconcile &&
+          upstreamCarriesCommittedDescription(rows, replacement)
+        ) {
+          this.deleteReplacement(replacement);
+          continue;
+        }
+        this.onReplacementExpired({
+          folderId: k === "__root__" ? null : Number(k),
+          name,
+          oldEntryId: replacement.oldEntryId,
+          newEntryId: replacement.newEntry.id,
+        });
+        replacement.expiresAt = now + REPLACEMENT_OVERLAY_MS;
       }
 
       merged = this.mergeReplacement(merged, replacement);

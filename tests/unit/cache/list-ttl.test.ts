@@ -325,7 +325,7 @@ describe("ListTtlCache replacement overlay", () => {
     expect(cache.replacementOverlaySize).toBe(0);
   });
 
-  test("expires after 60 seconds and reports non-convergence once", async () => {
+  test("soft-holds overlay past 60s when LIST still omits description and warns once", async () => {
     const expired: unknown[] = [];
     const cache = new ListTtlCache((event) => expired.push(event));
     const oldEntry = folderEntry(1, "backup.bin");
@@ -337,7 +337,9 @@ describe("ListTtlCache replacement overlay", () => {
       cache.replaceEntry(7, oldEntry.id, newEntry);
       now += 60_000;
 
-      expect(cache.replacementOverlaySize).toBe(0);
+      // Soft TTL: keep serving the overlay so cold checksum sync does not
+      // fall back to a synthetic fingerprint and re-upload the object.
+      expect(cache.replacementOverlaySize).toBe(1);
       expect(expired).toEqual([
         {
           folderId: 7,
@@ -346,14 +348,14 @@ describe("ListTtlCache replacement overlay", () => {
           newEntryId: 2,
         },
       ]);
-      expect(cache.replacementOverlaySize).toBe(0);
+      expect(cache.replacementOverlaySize).toBe(1);
       expect(expired).toHaveLength(1);
     } finally {
       Date.now = realNow;
     }
   });
 
-  test("removes an expired candidate while a later overlay remains active", async () => {
+  test("soft-holds an expired candidate while a later overlay remains active", async () => {
     const expired: unknown[] = [];
     const cache = new ListTtlCache((event) => expired.push(event));
     const replacementA = folderEntry(2, "a.bin");
@@ -370,6 +372,7 @@ describe("ListTtlCache replacement overlay", () => {
       now += 1_000;
 
       await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        replacementA,
         replacementB,
       ]);
       expect(expired).toHaveLength(1);
@@ -379,8 +382,9 @@ describe("ListTtlCache replacement overlay", () => {
         oldEntryId: 1,
         newEntryId: 2,
       });
-      expect(cache.replacementOverlaySize).toBe(1);
+      expect(cache.replacementOverlaySize).toBe(2);
       await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        replacementA,
         replacementB,
       ]);
       expect(expired).toHaveLength(1);
@@ -389,7 +393,7 @@ describe("ListTtlCache replacement overlay", () => {
     }
   });
 
-  test("restores a suppressed raw row when its overlay expires", async () => {
+  test("keeps serving overlay over a suppressed raw row when soft TTL elapses", async () => {
     const expired: unknown[] = [];
     const cache = new ListTtlCache((event) => expired.push(event));
     const oldA = folderEntry(1, "a.bin");
@@ -407,12 +411,13 @@ describe("ListTtlCache replacement overlay", () => {
       cache.replaceEntry(7, 3, candidateB);
       now += 1_000;
 
+      // Soft hold: keep candidateA rather than restoring weak oldA.
       await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
-        oldA,
+        candidateA,
         candidateB,
       ]);
       expect(expired).toHaveLength(1);
-      expect(cache.replacementOverlaySize).toBe(1);
+      expect(cache.replacementOverlaySize).toBe(2);
     } finally {
       Date.now = realNow;
     }

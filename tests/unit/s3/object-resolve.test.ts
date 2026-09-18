@@ -120,6 +120,58 @@ describe("resolveObjectKey duplicates", () => {
     });
   });
 
+  test("keeps committed ETag after overlay expiry when upstream list still omits description", async () => {
+    const { entryHasStrongContentEtag, etagFromFileEntry } = await import(
+      "../../../src/s3/tagging"
+    );
+    const oldEntry = fileEntry(11, "backup.bin");
+    const committed: FileEntry = {
+      ...fileEntry(33, "backup.bin"),
+      description: "md5:cccccccccccccccccccccccccccccccc-41",
+    };
+    const upstreamWeak: FileEntry = {
+      ...fileEntry(33, "backup.bin"),
+      description: null,
+    };
+    const listCache = new ListTtlCache();
+    const ctx = {
+      listCache,
+      folderCache: new FolderPathCache(),
+      drime: {
+        listFolder: async () => [upstreamWeak],
+      },
+      logger: {
+        error() {},
+      },
+    } as unknown as AppContext;
+
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      listCache.replaceEntry(7, oldEntry.id, committed);
+      // Cold boundary: overlay TTL elapsed; only weak LIST remains.
+      now += 60_000;
+
+      const resolved = await resolveObjectKey(
+        ctx,
+        1,
+        7,
+        "dup-bucket",
+        "backup.bin",
+      );
+
+      expect(resolved.kind).toBe("file");
+      if (resolved.kind !== "file") return;
+      expect(entryHasStrongContentEtag(resolved.entry)).toBe(true);
+      expect(etagFromFileEntry(resolved.entry)).toBe(
+        '"cccccccccccccccccccccccccccccccc-41"',
+      );
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test("readableObjectEntry stays available on ambiguous duplicates", () => {
     const first = fileEntry(11, "backup.bin");
     const second = fileEntry(22, "backup.bin");
