@@ -2,6 +2,7 @@ import type { FileEntry } from "../drime/types";
 
 const TTL_MS = 5000;
 const MAX_CACHED_KEYS = 5000;
+const MAX_STRONG_DESCRIPTIONS = 20_000;
 const REPLACEMENT_OVERLAY_MS = 60_000;
 
 function cacheKey(folderId: number | null): string {
@@ -14,6 +15,8 @@ type ReplacementOverlay = {
   oldEntryId?: number;
   newEntry: FileEntry;
   expiresAt: number;
+  /** Soft-TTL expiry callback fires at most once per overlay. */
+  expiredNotified?: boolean;
 };
 
 /** True when the upstream row for the candidate has the overlay's description. */
@@ -27,6 +30,13 @@ function upstreamCarriesCommittedDescription(
     (upstream.description ?? null) ===
     (replacement.newEntry.description ?? null)
   );
+}
+
+function descriptionLooksStrong(description: string | null): boolean {
+  const first = description?.split("\n")[0]?.trim() ?? "";
+  if (!first.startsWith("md5:")) return false;
+  const rest = first.slice(4).replace(/\s+/g, "").toLowerCase();
+  return /^[a-f0-9]{32}(-\d+)?$/.test(rest);
 }
 
 export type ReplacementOverlayExpired = {
@@ -50,6 +60,12 @@ export class ListTtlCache {
     ReplacementOverlay,
     { folderKey: string; name: string }
   >();
+  /**
+   * Committed ETag descriptions recovered after LIST omits them (e.g. cold
+   * restart hydrate). Separate from replacement overlays so enrichment cannot
+   * starve or thrash the create-first overlay budget.
+   */
+  private readonly strongDescriptions = new Map<number, string>();
 
   constructor(
     private readonly onReplacementExpired: (
@@ -79,6 +95,9 @@ export class ListTtlCache {
     if (idx >= 0) cached.entries[idx] = entry;
     else cached.entries.push(entry);
     cached.ts = Date.now();
+    if (descriptionLooksStrong(entry.description)) {
+      this.rememberStrongDescription(entry.id, entry.description as string);
+    }
   }
 
   /**
@@ -93,6 +112,25 @@ export class ListTtlCache {
     const before = cached.entries.length;
     cached.entries = cached.entries.filter((e) => e.id !== id);
     if (cached.entries.length !== before) cached.ts = Date.now();
+    this.strongDescriptions.delete(id);
+  }
+
+  /**
+   * Remember a committed `md5:…` description for an entry id so cold LIST/HEAD
+   * keep a strong ETag after gateway restart without consuming replacement
+   * overlay slots.
+   */
+  rememberStrongDescription(entryId: number, description: string): void {
+    if (!descriptionLooksStrong(description)) return;
+    if (this.strongDescriptions.has(entryId)) {
+      this.strongDescriptions.delete(entryId);
+    }
+    this.strongDescriptions.set(entryId, description);
+    while (this.strongDescriptions.size > MAX_STRONG_DESCRIPTIONS) {
+      const oldest = this.strongDescriptions.keys().next().value;
+      if (oldest === undefined) break;
+      this.strongDescriptions.delete(oldest);
+    }
   }
 
   replaceEntry(
@@ -108,7 +146,7 @@ export class ListTtlCache {
     }
     const previous = folderReplacements.get(newEntry.name);
     if (previous) this.replacementOrder.delete(previous);
-    const replacement = {
+    const replacement: ReplacementOverlay = {
       oldEntryId,
       newEntry,
       expiresAt: Date.now() + REPLACEMENT_OVERLAY_MS,
@@ -118,6 +156,13 @@ export class ListTtlCache {
       folderKey: k,
       name: newEntry.name,
     });
+    if (descriptionLooksStrong(newEntry.description)) {
+      this.rememberStrongDescription(
+        newEntry.id,
+        newEntry.description as string,
+      );
+    }
+    if (oldEntryId !== undefined) this.strongDescriptions.delete(oldEntryId);
     this.trimReplacementsIfNeeded();
   }
 
@@ -187,13 +232,27 @@ export class ListTtlCache {
     ];
   }
 
+  private applyStrongDescriptions(rows: FileEntry[]): FileEntry[] {
+    if (this.strongDescriptions.size === 0) return rows;
+    return rows.map((row) => {
+      if (row.is_folder || descriptionLooksStrong(row.description)) {
+        return row;
+      }
+      const remembered = this.strongDescriptions.get(row.id);
+      if (!remembered) return row;
+      return { ...row, description: remembered };
+    });
+  }
+
   private applyReplacements(
     k: string,
     rows: FileEntry[],
     reconcile: boolean,
   ): FileEntry[] {
     const folderReplacements = this.replacements.get(k);
-    if (!folderReplacements) return [...rows];
+    if (!folderReplacements) {
+      return this.applyStrongDescriptions([...rows]);
+    }
 
     let merged = [...rows];
     const now = Date.now();
@@ -225,8 +284,9 @@ export class ListTtlCache {
       /**
        * Soft TTL: do not drop the overlay when the window elapses while LIST
        * still omits the committed description (common for hours on cold
-       * re-LIST). Extend the window and warn so a long sync / cold re-sync
-       * keeps the ETag rclone already verified.
+       * re-LIST). Extend the window and warn once so a long sync / cold
+       * re-sync keeps the ETag rclone already verified without flooding logs
+       * (e.g. every /_health probe).
        */
       if (replacement.expiresAt <= now) {
         if (
@@ -236,25 +296,22 @@ export class ListTtlCache {
           this.deleteReplacement(replacement);
           continue;
         }
-        this.onReplacementExpired({
-          folderId: k === "__root__" ? null : Number(k),
-          name,
-          oldEntryId: replacement.oldEntryId,
-          newEntryId: replacement.newEntry.id,
-        });
+        if (!replacement.expiredNotified) {
+          replacement.expiredNotified = true;
+          this.onReplacementExpired({
+            folderId: k === "__root__" ? null : Number(k),
+            name,
+            oldEntryId: replacement.oldEntryId,
+            newEntryId: replacement.newEntry.id,
+          });
+        }
         replacement.expiresAt = now + REPLACEMENT_OVERLAY_MS;
       }
 
       merged = this.mergeReplacement(merged, replacement);
     }
 
-    return merged;
-  }
-
-  private pruneExpiredReplacements(): void {
-    for (const k of this.replacements.keys()) {
-      this.applyReplacements(k, [], false);
-    }
+    return this.applyStrongDescriptions(merged);
   }
 
   async getOrFetch(
@@ -302,8 +359,13 @@ export class ListTtlCache {
     return this.inflight.size;
   }
 
+  /** Active create-first replacement overlays (no prune side effects). */
   get replacementOverlaySize(): number {
-    this.pruneExpiredReplacements();
     return this.replacementOrder.size;
+  }
+
+  /** Remembered strong descriptions for cold LIST/HEAD ETag recovery. */
+  get strongDescriptionSize(): number {
+    return this.strongDescriptions.size;
   }
 }

@@ -17,26 +17,25 @@ function hydrateConcurrency(): number {
 
 /**
  * When Drive LIST omits the committed `md5:…` description (common after a
- * gateway restart), fetch the entry by id and soft-hold the strong metadata in
- * the replacement overlay so rclone `--checksum` can skip existing objects.
+ * gateway restart), fetch the entry by id and remember the strong metadata
+ * without consuming create-first replacement overlay slots.
  */
 export async function hydrateObjectEntry(
   ctx: AppContext,
-  folderId: number | null,
+  _folderId: number | null,
   entry: FileEntry,
 ): Promise<FileEntry> {
   if (entry.is_folder || entryHasStrongContentEtag(entry)) return entry;
 
   try {
     const full = await ctx.drime.getFileEntry(entry.id);
-    if (!entryHasStrongContentEtag(full)) return entry;
-    const merged: FileEntry = {
+    if (!entryHasStrongContentEtag(full) || !full.description) return entry;
+    ctx.listCache.rememberStrongDescription(entry.id, full.description);
+    return {
       ...entry,
       description: full.description,
       hash: full.hash ?? entry.hash,
     };
-    ctx.listCache.replaceEntry(folderId, entry.id, merged);
-    return merged;
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     if (!hydrateMissWarned && typeof ctx.logger.warn === "function") {
@@ -76,7 +75,7 @@ async function mapPool<T, R>(
 }
 
 /**
- * Hydrate weak LIST rows in parallel (bounded) and soft-hold recovered ETags.
+ * Hydrate weak LIST rows in parallel (bounded) and remember recovered ETags.
  */
 export async function hydrateListingEtags(
   ctx: AppContext,

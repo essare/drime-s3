@@ -339,6 +339,9 @@ describe("ListTtlCache replacement overlay", () => {
 
       // Soft TTL: keep serving the overlay so cold checksum sync does not
       // fall back to a synthetic fingerprint and re-upload the object.
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        newEntry,
+      ]);
       expect(cache.replacementOverlaySize).toBe(1);
       expect(expired).toEqual([
         {
@@ -347,6 +350,12 @@ describe("ListTtlCache replacement overlay", () => {
           oldEntryId: 1,
           newEntryId: 2,
         },
+      ]);
+
+      // Later soft-hold refresh must not re-warn (health/list storms).
+      now += 60_000;
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        newEntry,
       ]);
       expect(cache.replacementOverlaySize).toBe(1);
       expect(expired).toHaveLength(1);

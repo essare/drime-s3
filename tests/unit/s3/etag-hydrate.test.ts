@@ -76,8 +76,23 @@ describe("cold ETag hydration after process restart", () => {
     expect(etagFromFileEntry(row)).toBe(
       '"cccccccccccccccccccccccccccccccc-41"',
     );
-    // Soft-held so a later cold re-LIST in this process does not re-fetch.
-    expect(listCache.replacementOverlaySize).toBe(1);
+    // Remembered description must not consume create-first overlay budget.
+    expect(listCache.replacementOverlaySize).toBe(0);
+    expect(listCache.strongDescriptionSize).toBe(1);
+
+    // Later cold LIST still serves the remembered ETag without re-fetch.
+    listCache.invalidate(7);
+    getCalls = 0;
+    const again = await listCache.getOrFetch(7, () =>
+      ctx.drime.listFolder(7, 1),
+    );
+    expect(getCalls).toBe(0);
+    const againRow = again[0];
+    expect(againRow).toBeDefined();
+    if (!againRow) return;
+    expect(etagFromFileEntry(againRow)).toBe(
+      '"cccccccccccccccccccccccccccccccc-41"',
+    );
   });
 
   test("resolveObjectKey recovers committed ETag on cold HEAD path", async () => {
