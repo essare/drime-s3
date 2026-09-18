@@ -39,7 +39,7 @@ export async function hydrateObjectEntry(
     return merged;
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
-    if (!hydrateMissWarned) {
+    if (!hydrateMissWarned && typeof ctx.logger.warn === "function") {
       hydrateMissWarned = true;
       ctx.logger.warn({ entryId: entry.id, err }, "etag_hydrate_miss");
     } else if (typeof ctx.logger.debug === "function") {
