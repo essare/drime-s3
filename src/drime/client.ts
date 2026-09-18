@@ -29,6 +29,22 @@ export class DrimeApiError extends Error {
   }
 }
 
+/**
+ * Exact production body Drime returns from `POST /file-entries/delete` when an
+ * entry id no longer exists (e.g. a stale listing resurrected a deleted row).
+ * This is diagnostic only: no delete error, including this one, is ever treated
+ * as success without a fresh listing proving the outcome.
+ */
+const INVALID_ENTRY_IDS_MESSAGE = "selected entry ids is invalid";
+
+export function isInvalidEntryIdsError(error: unknown): boolean {
+  return (
+    error instanceof DrimeApiError &&
+    error.status === 422 &&
+    error.body.includes(INVALID_ENTRY_IDS_MESSAGE)
+  );
+}
+
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_ATTEMPTS = 5;
 const PER_PAGE = 100;
@@ -239,6 +255,25 @@ export class DrimeClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ description }),
     });
+  }
+
+  /**
+   * Fetch one entry by id. Used when Drive LIST omits `description` after a
+   * gateway restart so cold S3 LIST/HEAD can still expose the committed ETag.
+   */
+  async getFileEntry(entryId: number): Promise<FileEntry> {
+    const res = await this.request("GET", `/file-entries/${entryId}`);
+    const payload = (await res.json()) as unknown;
+    if (payload !== null && typeof payload === "object") {
+      const o = payload as Record<string, unknown>;
+      if (o.fileEntry !== undefined) return fromFileEntryJson(o.fileEntry);
+      if (o.file !== undefined) return fromFileEntryJson(o.file);
+      if (o.entry !== undefined) return fromFileEntryJson(o.entry);
+      if (o.data !== undefined && !Array.isArray(o.data)) {
+        return fromFileEntryJson(o.data);
+      }
+    }
+    return fromFileEntryJson(payload);
   }
 
   /** Authenticated `fetch` to an absolute URL (e.g. file download). */

@@ -87,7 +87,14 @@ export async function createAppContext(
     drime,
     gatewayWorkspaceId,
     folderCache: new FolderPathCache(),
-    listCache: new ListTtlCache(),
+    listCache: new ListTtlCache(
+      (event) => {
+        logger.warn(event, "replacement_overlay_expired");
+      },
+      (event) => {
+        logger.warn(event, "replacement_overlay_evicted");
+      },
+    ),
     statsCache: new StatsCache(),
     objectCountsCache: new ObjectCountsCache(),
     multipartStore: new MultipartSessionStore(),

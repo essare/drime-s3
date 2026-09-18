@@ -3,8 +3,11 @@ import { XMLParser } from "fast-xml-parser";
 import pino from "pino";
 import type { AppConfig } from "../../src/config";
 import { dispatch } from "../../src/s3/router";
-import { createAppContext } from "../../src/server-context";
-import { startMockDrime } from "../fixtures/mock-drime/server";
+import { type AppContext, createAppContext } from "../../src/server-context";
+import {
+  type MockDrimeServer,
+  startMockDrime,
+} from "../fixtures/mock-drime/server";
 
 function testConfig(apiBaseUrl: string): AppConfig {
   return {
@@ -47,6 +50,24 @@ async function uploadAt(
   fd.append("parentId", String(parentId));
   const res = await fetch(`${baseUrl}/uploads`, { method: "POST", body: fd });
   expect(res.ok).toBe(true);
+}
+
+async function duplicateExactName(
+  ctx: AppContext,
+  mock: MockDrimeServer,
+  bucket: string,
+  key: string,
+): Promise<{ originalId: number; cloneId: number }> {
+  const original = mock.snapshotFileEntries().find((e) => e.name === key);
+  expect(original).toBeDefined();
+  const cloneId = mock.cloneFileById(original?.id ?? 0);
+  expect(cloneId).toBeDefined();
+  const ws = ctx.gatewayWorkspaceId ?? 1;
+  const roots = await ctx.drime.listFolder(null, ws);
+  const bucketFolder = roots.find((e) => e.is_folder && e.name === bucket);
+  expect(bucketFolder).toBeDefined();
+  ctx.listCache.invalidate(bucketFolder?.id ?? 0);
+  return { originalId: original?.id ?? 0, cloneId: cloneId ?? 0 };
 }
 
 describe("ListObjects", () => {
@@ -383,6 +404,89 @@ describe("ListObjects", () => {
       expect(xml).toContain("CommonPrefixes");
       expect(xml).toContain("nested/");
       expect(xml).not.toContain("other.txt");
+    } finally {
+      mock.stop();
+    }
+  });
+
+  test("collapses retained exact-name duplicates to one Contents row", async () => {
+    const mock = await startMockDrime();
+    try {
+      const ctx = await createAppContext({
+        config: testConfig(mock.baseUrl),
+        logger: pino({ level: "silent" }),
+      });
+      const base = "http://127.0.0.1:8081";
+      const h = { Host: "127.0.0.1:8081" };
+      const bucket = "list-dup-bucket";
+
+      await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}`, { method: "PUT", headers: h }),
+      );
+      const put = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/backup.bin`, {
+          method: "PUT",
+          headers: {
+            ...h,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "old-backup-v1",
+        }),
+      );
+      expect(put.status).toBe(200);
+      await duplicateExactName(ctx, mock, bucket, "backup.bin");
+
+      const got = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/backup.bin`, {
+          method: "GET",
+          headers: h,
+        }),
+      );
+      expect(got.status).toBe(200);
+      const getEtag = got.headers.get("etag")?.replace(/^"+|"+$/g, "") ?? "";
+      expect(getEtag.length).toBeGreaterThan(0);
+
+      const listed = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}?list-type=2`, {
+          method: "GET",
+          headers: h,
+        }),
+      );
+      expect(listed.status).toBe(200);
+      const xml = await listed.text();
+      const doc = xmlParser.parse(xml) as Record<string, unknown>;
+      const root = doc.ListBucketResult ?? doc.listBucketResult;
+      expect(root && typeof root === "object").toBe(true);
+      const contents = (root as Record<string, unknown>).Contents;
+      const rows = Array.isArray(contents)
+        ? contents
+        : contents
+          ? [contents]
+          : [];
+      expect(rows).toHaveLength(1);
+      const row = rows[0] as Record<string, unknown>;
+      expect(String(row.Key ?? "")).toBe("backup.bin");
+      expect(String(row.ETag ?? "").replace(/^"+|"+$/g, "")).toBe(getEtag);
+
+      const overwrite = await dispatch(
+        ctx,
+        new Request(`${base}/${bucket}/backup.bin`, {
+          method: "PUT",
+          headers: {
+            ...h,
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "14",
+          },
+          body: "new-backup-v2",
+        }),
+      );
+      expect(overwrite.status).toBe(500);
+      expect(await overwrite.text()).toContain("Object key is ambiguous.");
     } finally {
       mock.stop();
     }

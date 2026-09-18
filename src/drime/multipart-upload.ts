@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import type { AppContext } from "../server-context";
 
@@ -44,6 +43,17 @@ export function getMultipartPartConcurrency(): number {
 /** Batch size when calling `s3/multipart/batch-sign-part-urls`. */
 const SIGN_BATCH_SIZE = 100;
 
+const RETRYABLE_PART_STATUSES = new Set([429, 502, 503, 504]);
+const PART_MAX_ATTEMPTS = 5;
+const PART_BACKOFF_BASE_MS = 250;
+const PART_BACKOFF_CAP_MS = 4_000;
+
+export type PartRetryOptions = {
+  maxAttempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+};
+
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
   const n = Number.parseInt(raw, 10);
@@ -67,15 +77,15 @@ export type MultipartUploadOptions = {
   workspaceId: number;
   /** Override constants in tests. */
   partSize?: number;
+  /** Test seam for deterministic part retry timing. */
+  retry?: PartRetryOptions;
 };
 
 export type MultipartUploadResult = {
-  /** Quoted composite multipart-style ETag (md5-of-md5s + "-" + partCount). */
-  etag: string;
   /** Final byte length stored. */
   size: number;
-  /** Drime fileEntry id, when discoverable from `s3CreateEntry` response. */
-  fileEntryId?: number;
+  /** Raw `s3CreateEntry` response; the handler chooses the public S3 ETag. */
+  entryRaw: unknown;
 };
 
 /**
@@ -131,19 +141,14 @@ export async function uploadFileViaInternalMultipart(
           const buf = Buffer.alloc(length);
           await fh.read(buf, 0, length, start);
 
-          const upstream = await ctx.drime.putUnsignedUrl(url, {
-            body: buf,
-            headers: {
-              "Content-Type": "application/octet-stream",
-              "Content-Length": String(length),
-            },
-          });
-          if (!upstream.ok) {
-            const txt = await upstream.text().catch(() => "");
-            throw new Error(
-              `Part ${pn} upload failed (${upstream.status}): ${txt.slice(0, 200)}`,
-            );
-          }
+          const upstream = await uploadPartWithRetry(
+            ctx,
+            url,
+            buf,
+            length,
+            pn,
+            opts.retry,
+          );
           const etagHdr = upstream.headers.get("etag") ?? "";
           partEtags[pn - 1] = etagHdr.replace(/^"+|"+$/g, "");
         }
@@ -186,10 +191,94 @@ export async function uploadFileViaInternalMultipart(
   }
 
   return {
-    etag: compositeMultipartEtag(partEtags),
     size: opts.totalSize,
-    fileEntryId: parseFileEntryId(entryRaw),
+    entryRaw,
   };
+}
+
+/** @internal Exported for deterministic backoff boundary tests. */
+export function retryDelayMs(attempt: number, random: () => number): number {
+  const base = Math.min(
+    PART_BACKOFF_CAP_MS,
+    PART_BACKOFF_BASE_MS * 2 ** (attempt - 1),
+  );
+  return Math.floor(base * (0.5 + random() * 0.5));
+}
+
+function retryErrorMessage(error: unknown, signedUrl: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replaceAll(signedUrl, "[signed URL omitted]");
+}
+
+/** Replay a buffered part PUT through the bounded retry policy. */
+export async function uploadPartWithRetry(
+  ctx: AppContext,
+  url: string,
+  body: Buffer<ArrayBuffer>,
+  length: number,
+  partNumber: number,
+  retry: PartRetryOptions = {},
+): Promise<Response> {
+  const requestedAttempts = Math.floor(retry.maxAttempts ?? PART_MAX_ATTEMPTS);
+  const maxAttempts = Number.isFinite(requestedAttempts)
+    ? Math.min(PART_MAX_ATTEMPTS, Math.max(1, requestedAttempts))
+    : PART_MAX_ATTEMPTS;
+  const sleep =
+    retry.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const random = retry.random ?? Math.random;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let upstream: Response;
+    try {
+      upstream = await ctx.drime.putUnsignedUrl(url, {
+        body,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": String(length),
+        },
+      });
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        const sanitizedCause = new Error(retryErrorMessage(error, url));
+        throw new Error(
+          `Part ${partNumber} upload failed after ${maxAttempts} attempts`,
+          { cause: sanitizedCause },
+        );
+      }
+      ctx.logger.warn(
+        {
+          partNumber,
+          attempt,
+          error: retryErrorMessage(error, url),
+        },
+        "upload_part_retry",
+      );
+      await sleep(retryDelayMs(attempt, random));
+      continue;
+    }
+
+    if (upstream.ok) return upstream;
+
+    await upstream.text().catch(() => "");
+    if (!RETRYABLE_PART_STATUSES.has(upstream.status)) {
+      throw new Error(`Part ${partNumber} upload failed (${upstream.status})`);
+    }
+    if (attempt === maxAttempts) {
+      throw new Error(
+        `Part ${partNumber} upload failed after ${maxAttempts} attempts`,
+      );
+    }
+    ctx.logger.warn(
+      { partNumber, attempt, status: upstream.status },
+      "upload_part_retry",
+    );
+    await sleep(retryDelayMs(attempt, random));
+  }
+
+  throw new Error(
+    `Part ${partNumber} upload failed after ${maxAttempts} attempts`,
+  );
 }
 
 async function batchSignAllParts(
@@ -216,33 +305,4 @@ async function batchSignAllParts(
     );
   }
   return out;
-}
-
-/**
- * Composite multipart ETag using S3's "MD5-of-MD5s + '-' + partCount" format.
- * Each input is an opaque per-part ETag returned by Drime's storage backend
- * (typically a 32-char MD5 hex string). Non-hex ETags fall back to MD5(text).
- */
-function compositeMultipartEtag(partEtagsHex: string[]): string {
-  const digests: Buffer[] = [];
-  for (const raw of partEtagsHex) {
-    const hex = raw.replace(/^"+|"+$/g, "");
-    if (/^[a-f0-9]{32}$/i.test(hex)) {
-      digests.push(Buffer.from(hex, "hex"));
-    } else {
-      digests.push(createHash("md5").update(hex, "utf8").digest());
-    }
-  }
-  const combined = Buffer.concat(digests);
-  const md5 = createHash("md5").update(combined).digest("hex");
-  return `"${md5}-${partEtagsHex.length}"`;
-}
-
-function parseFileEntryId(raw: unknown): number | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const o = raw as Record<string, unknown>;
-  const fe = o.fileEntry ?? o.file ?? o.entry;
-  if (!fe || typeof fe !== "object") return undefined;
-  const id = (fe as Record<string, unknown>).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
 }

@@ -188,6 +188,7 @@ export async function dispatch(
       folderPathCache: ctx.folderCache.size,
       listTtlCache: ctx.listCache.size,
       listTtlInflight: ctx.listCache.inflightSize,
+      replacementOverlays: ctx.listCache.replacementOverlaySize,
       multipartSessions: ctx.multipartStore.size,
       webUi: {
         passwordSet: ctx.webUi.enabled,

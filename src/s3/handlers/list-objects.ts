@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { drimeTimestampToIso } from "../../drime/datetime";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
+import { hydrateListingEtags } from "../etag-hydrate";
 import { etagFromFileEntry } from "../tagging";
 import { type ListBucketEntry, listBucketResultXml } from "../xml";
 
@@ -87,6 +88,18 @@ function toContent(entry: FileEntry, key: string): ListBucketEntry {
   };
 }
 
+/** Keep the first row per key so ListObjects matches GET/HEAD readable order. */
+function firstReadableContents(contents: ListBucketEntry[]): ListBucketEntry[] {
+  const seen = new Set<string>();
+  const out: ListBucketEntry[] = [];
+  for (const row of contents) {
+    if (seen.has(row.Key)) continue;
+    seen.add(row.Key);
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Resolve `relativePath` (no slashes at ends) as folder segments under `startFolderId`.
  * Folder segments are matched case-insensitively (Python `_find_folder_id`).
@@ -124,9 +137,10 @@ async function listRecursive(
   folderId: number,
   basePrefix: string,
 ): Promise<ListBucketEntry[]> {
-  const entries = await ctx.listCache.getOrFetch(folderId, () =>
+  const raw = await ctx.listCache.getOrFetch(folderId, () =>
     ctx.drime.listFolder(folderId, W),
   );
+  const entries = await hydrateListingEtags(ctx, folderId, raw);
   const out: ListBucketEntry[] = [];
   for (const entry of entries) {
     const fullKey = basePrefix + entry.name;
@@ -145,9 +159,10 @@ async function listWithDelimiter(
   folderId: number,
   basePrefix: string,
 ): Promise<{ contents: ListBucketEntry[]; folders: AdminFolder[] }> {
-  const entries = await ctx.listCache.getOrFetch(folderId, () =>
+  const raw = await ctx.listCache.getOrFetch(folderId, () =>
     ctx.drime.listFolder(folderId, W),
   );
+  const entries = await hydrateListingEtags(ctx, folderId, raw);
   const contents: ListBucketEntry[] = [];
   const folders: AdminFolder[] = [];
   for (const entry of entries) {
@@ -247,10 +262,12 @@ export async function listObjectsCore(
 
   if (delimiter.length > 0) {
     const r = await listWithDelimiter(ctx, W, folderId, basePrefix);
-    contents = r.contents;
+    contents = firstReadableContents(r.contents);
     folders = r.folders;
   } else {
-    contents = await listRecursive(ctx, W, folderId, basePrefix);
+    contents = firstReadableContents(
+      await listRecursive(ctx, W, folderId, basePrefix),
+    );
   }
 
   // Apply the full prefix as a string filter (covers the file-name portion that

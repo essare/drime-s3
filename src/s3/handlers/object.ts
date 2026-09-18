@@ -15,9 +15,13 @@ import {
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
+import { safeHandlerErrorFields } from "../handler-error-fields";
 import { isValidBucketName } from "../naming";
 import {
-  buildObjectDescription,
+  commitObjectReplacement,
+  ObjectReplacementError,
+} from "../object-replacement";
+import {
   entryHasStrongContentEtag,
   etagFromFileEntry,
   objectTaggingXml,
@@ -25,13 +29,37 @@ import {
 } from "../tagging";
 import { copyObjectResultXml } from "../xml";
 import { findRootFolder, parseCreateFolderResponse } from "./bucket";
-import { resolveObjectKey } from "./object-resolve";
+import {
+  ambiguousMutationError,
+  readableObjectEntry,
+  resolveObjectKey,
+} from "./object-resolve";
 
 function xmlErr(status: number, code: string, message: string): Response {
   return new Response(s3ErrorXml(code, message), {
     status,
     headers: { "Content-Type": "application/xml" },
   });
+}
+
+function oldEntryFromResolved(
+  resolved: Awaited<ReturnType<typeof resolveObjectKey>>,
+): FileEntry | undefined {
+  return resolved.kind === "file" || resolved.kind === "folder"
+    ? resolved.entry
+    : undefined;
+}
+
+/** Map coordinator failures to S3 InternalError without serializing cause chains. */
+function replacementStageError(
+  ctx: AppContext,
+  error: ObjectReplacementError,
+  fields: Record<string, unknown>,
+  logMessage: string,
+  clientMessage: string,
+): Response {
+  ctx.logger.error({ ...fields, stage: error.stage }, logMessage);
+  return xmlErr(500, "InternalError", clientMessage);
 }
 
 function formatHttpDate(updatedAt: string | null): string {
@@ -110,15 +138,6 @@ export async function ensureParentFolderForPut(
     currentPid = found.id;
   }
   return { ok: true, parentId: currentPid };
-}
-
-function parseUploadFileEntryId(raw: unknown): number | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const o = raw as Record<string, unknown>;
-  const fe = o.fileEntry ?? o.file;
-  if (!fe || typeof fe !== "object") return undefined;
-  const id = (fe as Record<string, unknown>).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
 }
 
 async function writeRequestBodyToTemp(
@@ -218,10 +237,11 @@ async function handlePutCopyObject(
     parsed.bucket,
     parsed.key,
   );
-  if (srcResolved.kind !== "file") {
+  const srcReadable = readableObjectEntry(srcResolved);
+  if (!srcReadable || srcReadable.entry.is_folder) {
     return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
   }
-  const srcEntry = srcResolved.entry;
+  const srcEntry = srcReadable.entry;
   const downloadUrl = resolveDownloadUrl(srcEntry, ctx);
   const upstream = await ctx.drime.fetchAuthenticated(downloadUrl, {
     method: "GET",
@@ -256,29 +276,25 @@ async function handlePutCopyObject(
     const tmpPath = join(tmpDir, "src.bin");
     await writeFile(tmpPath, buf);
 
-    if (destResolved.kind === "file" || destResolved.kind === "folder") {
-      await ctx.drime.deleteEntriesForever([destResolved.entry.id]);
-      ctx.listCache.invalidate(destResolved.parentFolderId);
-    }
-
     const uploadRaw = await ctx.drime.uploadFile({
       filePath: tmpPath,
       relativePath,
       parentId,
       workspaceId: W,
     });
-    const uploadedId = parseUploadFileEntryId(uploadRaw);
-    if (uploadedId !== undefined) {
-      try {
-        await ctx.drime.updateFileEntryDescription(
-          uploadedId,
-          buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
-        );
-      } catch {
-        /* optional Drime feature */
-      }
-    }
-    ctx.listCache.invalidate(parentId);
+    await commitObjectReplacement(ctx, {
+      rawCandidate: uploadRaw,
+      oldEntry: oldEntryFromResolved(destResolved),
+      parentId,
+      workspaceId: W,
+      bucket: destBucket,
+      key: destKey,
+      name: basename,
+      size: buf.length,
+      mime: "application/octet-stream",
+      publicEtag: `"${md5Hex}"`,
+      tagging: req.headers.get("x-amz-tagging"),
+    });
 
     const xml = copyObjectResultXml({
       etag: `"${md5Hex}"`,
@@ -291,9 +307,23 @@ async function handlePutCopyObject(
       },
     });
   } catch (e) {
+    if (e instanceof ObjectReplacementError) {
+      return replacementStageError(
+        ctx,
+        e,
+        {
+          srcBucket: parsed.bucket,
+          srcKey: parsed.key,
+          destBucket,
+          destKey,
+        },
+        "PUT copy object replacement failed",
+        "Copy failed.",
+      );
+    }
     ctx.logger.error(
       {
-        err: e,
+        ...safeHandlerErrorFields(e),
         srcBucket: parsed.bucket,
         srcKey: parsed.key,
         destBucket,
@@ -301,13 +331,6 @@ async function handlePutCopyObject(
       },
       "PUT copy object failed",
     );
-    if (ctx.config.insecure && e instanceof Error) {
-      return xmlErr(
-        500,
-        "InternalError",
-        `Copy failed: ${e.message.slice(0, 800)}`,
-      );
-    }
     return xmlErr(500, "InternalError", "Copy failed.");
   } finally {
     if (tmpDir) {
@@ -420,15 +443,19 @@ export async function handleObjectRequest(
 
   const resolved = await resolveObjectKey(ctx, W, bucketRootId, bucket, key);
 
+  if (
+    (method === "PUT" || method === "DELETE") &&
+    resolved.kind === "ambiguous"
+  ) {
+    return ambiguousMutationError(ctx, bucket, key, resolved);
+  }
+
   if (method === "GET" && url.searchParams.has("tagging")) {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file" ||
-      resolved.kind === "folder"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable || readable.entry.is_folder) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    const xml = objectTaggingXml(parseTaggingLine(resolved.entry.description));
+    const xml = objectTaggingXml(parseTaggingLine(readable.entry.description));
     return new Response(xml, {
       status: 200,
       headers: { "Content-Type": "application/xml" },
@@ -436,14 +463,11 @@ export async function handleObjectRequest(
   }
 
   if (method === "HEAD") {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file" ||
-      resolved.kind === "folder"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable || readable.entry.is_folder) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    const { entry } = resolved;
+    const { entry } = readable;
     const downloadUrl = resolveDownloadUrl(entry, ctx);
     let etag = etagFromFileEntry(entry);
     if (
@@ -472,20 +496,18 @@ export async function handleObjectRequest(
   }
 
   if (method === "GET") {
-    if (
-      resolved.kind === "missing_prefix" ||
-      resolved.kind === "missing_file"
-    ) {
+    const readable = readableObjectEntry(resolved);
+    if (!readable) {
       return xmlErr(404, "NoSuchKey", "The specified key does not exist.");
     }
-    if (resolved.kind === "folder") {
+    if (readable.entry.is_folder) {
       return xmlErr(
         400,
         "InvalidRequest",
         "Cannot download folder as an object.",
       );
     }
-    const { entry } = resolved;
+    const { entry } = readable;
     const downloadUrl = resolveDownloadUrl(entry, ctx);
     const range = req.headers.get("Range");
     const upstream = await ctx.drime.fetchAuthenticated(downloadUrl, {
@@ -493,12 +515,12 @@ export async function handleObjectRequest(
       headers: range ? { Range: range } : undefined,
     });
     if (!upstream.ok && upstream.status !== 206) {
-      const t = await upstream.text();
-      return xmlErr(
-        500,
-        "DownloadFailed",
-        `Upstream download failed (${upstream.status}): ${t.slice(0, 200)}`,
+      await upstream.text().catch(() => "");
+      ctx.logger.error(
+        { bucket, key, upstreamStatus: upstream.status },
+        "object download failed",
       );
+      return xmlErr(500, "DownloadFailed", "Upstream download failed.");
     }
 
     const strong = entryHasStrongContentEtag(entry);
@@ -542,8 +564,15 @@ export async function handleObjectRequest(
     ) {
       return new Response(null, { status: 204 });
     }
+    if (resolved.kind !== "file" && resolved.kind !== "folder") {
+      return xmlErr(500, "InternalError", "Delete failed.");
+    }
     try {
       await ctx.drime.deleteEntriesForever([resolved.entry.id]);
+      ctx.listCache.clearReplacement(
+        resolved.parentFolderId,
+        resolved.entry.name,
+      );
       ctx.listCache.invalidate(resolved.parentFolderId);
       ctx.folderCache.evictPrefix(normalizePathKey(`${bucket}/${key}`));
       return new Response(null, { status: 204 });
@@ -591,14 +620,11 @@ export async function handleObjectRequest(
       tmpDir = spooled.tmpDir;
       const { tmpPath, md5Hex, totalSize } = spooled;
 
-      if (resolved.kind === "file" || resolved.kind === "folder") {
-        await ctx.drime.deleteEntriesForever([resolved.entry.id]);
-        ctx.listCache.invalidate(resolved.parentFolderId);
-      }
-
       // Drime's `/uploads` endpoint sits behind a Cloudflare 100 MiB
       // request-size cap. For larger bodies, fall back to Drime's S3
       // multipart protocol (presigned per-part PUTs to storage, no cap).
+      // The public S3 ETag is always the spooled full-body MD5.
+      let rawCandidate: unknown;
       if (totalSize > getMultipartPutThresholdBytes()) {
         const multipart = await uploadFileViaInternalMultipart(ctx, {
           tmpPath,
@@ -609,49 +635,29 @@ export async function handleObjectRequest(
           parentId,
           workspaceId: W,
         });
-        // Persist the composite ETag so subsequent GET/HEAD/list responses
-        // return the same value as the upload response.
-        if (multipart.fileEntryId !== undefined) {
-          try {
-            await ctx.drime.updateFileEntryDescription(
-              multipart.fileEntryId,
-              buildObjectDescription(
-                multipart.etag.replace(/^"|"$/g, ""),
-                req.headers.get("x-amz-tagging"),
-              ),
-            );
-          } catch {
-            /* optional Drime feature */
-          }
-        }
-        ctx.listCache.invalidate(parentId);
-        return new Response("", {
-          status: 200,
-          headers: {
-            ETag: multipart.etag,
-            "Content-Length": "0",
-          },
+        rawCandidate = multipart.entryRaw;
+      } else {
+        rawCandidate = await ctx.drime.uploadFile({
+          filePath: tmpPath,
+          relativePath,
+          parentId,
+          workspaceId: W,
         });
       }
 
-      const raw = await ctx.drime.uploadFile({
-        filePath: tmpPath,
-        relativePath,
+      await commitObjectReplacement(ctx, {
+        rawCandidate,
+        oldEntry: oldEntryFromResolved(resolved),
         parentId,
         workspaceId: W,
+        bucket,
+        key,
+        name: basename,
+        size: totalSize,
+        mime: "application/octet-stream",
+        publicEtag: `"${md5Hex}"`,
+        tagging: req.headers.get("x-amz-tagging"),
       });
-      const uploadedId = parseUploadFileEntryId(raw);
-      if (uploadedId !== undefined) {
-        try {
-          await ctx.drime.updateFileEntryDescription(
-            uploadedId,
-            buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
-          );
-        } catch {
-          /* optional Drime feature */
-        }
-      }
-      ctx.listCache.invalidate(parentId);
 
       return new Response("", {
         status: 200,
@@ -664,17 +670,25 @@ export async function handleObjectRequest(
       if (e instanceof ChunkedPayloadError) {
         return xmlErr(400, "InvalidRequest", e.message);
       }
+      if (e instanceof ObjectReplacementError) {
+        return replacementStageError(
+          ctx,
+          e,
+          { bucket, key, parentId, relativePath },
+          "PUT object replacement failed",
+          "Upload failed.",
+        );
+      }
       ctx.logger.error(
-        { err: e, bucket, key, parentId, relativePath },
+        {
+          ...safeHandlerErrorFields(e),
+          bucket,
+          key,
+          parentId,
+          relativePath,
+        },
         "PUT object failed",
       );
-      // In insecure (dev) mode, surface the upstream error so the operator can
-      // diagnose without grepping logs. Production callers still see the
-      // generic message to avoid leaking internals.
-      if (ctx.config.insecure && e instanceof Error) {
-        const detail = e.message.slice(0, 800);
-        return xmlErr(500, "InternalError", `Upload failed: ${detail}`);
-      }
       return xmlErr(500, "InternalError", "Upload failed.");
     } finally {
       if (tmpDir) {

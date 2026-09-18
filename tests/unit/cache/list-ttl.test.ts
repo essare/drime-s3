@@ -196,3 +196,294 @@ describe("ListTtlCache addEntry / removeEntryById", () => {
     }).not.toThrow();
   });
 });
+
+describe("ListTtlCache replacement overlay", () => {
+  test("immediately replaces an old cached entry", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+    await cache.getOrFetch(7, async () => [oldEntry]);
+
+    cache.replaceEntry(7, oldEntry.id, newEntry);
+
+    await expect(cache.getOrFetch(7, async () => [oldEntry])).resolves.toEqual([
+      newEntry,
+    ]);
+  });
+
+  test("suppresses a stale same-name entry returned after invalidation", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, oldEntry.id, newEntry);
+    cache.invalidate(7);
+
+    await expect(cache.getOrFetch(7, async () => [oldEntry])).resolves.toEqual([
+      newEntry,
+    ]);
+  });
+
+  test("suppresses a stale same-name entry with a different old id", async () => {
+    const cache = new ListTtlCache();
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, 1, newEntry);
+
+    await expect(
+      cache.getOrFetch(7, async () => [folderEntry(99, "backup.bin")]),
+    ).resolves.toEqual([newEntry]);
+  });
+
+  test("does not reconcile from an overlay-transformed cache hit", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+    await cache.getOrFetch(7, async () => [oldEntry]);
+    cache.replaceEntry(7, oldEntry.id, newEntry);
+
+    await cache.getOrFetch(7, async () => [oldEntry]);
+    cache.invalidate(7);
+
+    await expect(cache.getOrFetch(7, async () => [oldEntry])).resolves.toEqual([
+      newEntry,
+    ]);
+  });
+
+  test("replacement overlays an in-flight stale listing", async () => {
+    const cache = new ListTtlCache();
+    let release!: (rows: FileEntry[]) => void;
+    const upstream = new Promise<FileEntry[]>((resolve) => {
+      release = resolve;
+    });
+    const pending = cache.getOrFetch(7, () => upstream);
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+
+    cache.replaceEntry(7, oldEntry.id, newEntry);
+    release([oldEntry]);
+
+    await expect(pending).resolves.toEqual([newEntry]);
+  });
+
+  test("reconciles when upstream contains the new id without the old id", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, oldEntry.id, newEntry);
+
+    await cache.getOrFetch(7, async () => [newEntry]);
+
+    expect(cache.replacementOverlaySize).toBe(0);
+  });
+
+  test("keeps overlay when upstream candidate lacks the committed ETag description", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const committed: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      file_size: 200 * 1024 * 1024,
+      description: "md5:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-41",
+    };
+    const upstreamWeak: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      file_size: 200 * 1024 * 1024,
+      description: null,
+    };
+    cache.replaceEntry(7, oldEntry.id, committed);
+
+    await expect(
+      cache.getOrFetch(7, async () => [upstreamWeak]),
+    ).resolves.toEqual([committed]);
+    expect(cache.replacementOverlaySize).toBe(1);
+  });
+
+  test("reconciles once upstream candidate carries the same ETag description", async () => {
+    const cache = new ListTtlCache();
+    const oldEntry = folderEntry(1, "backup.bin");
+    const committed: FileEntry = {
+      ...folderEntry(2, "backup.bin"),
+      is_folder: false,
+      description: "md5:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-13",
+    };
+    cache.replaceEntry(7, oldEntry.id, committed);
+
+    await expect(
+      cache.getOrFetch(7, async () => [{ ...committed }]),
+    ).resolves.toEqual([committed]);
+    expect(cache.replacementOverlaySize).toBe(0);
+  });
+
+  test("clearReplacement stops overlay from resurrecting a deleted object", async () => {
+    const cache = new ListTtlCache();
+    const newEntry = folderEntry(2, "backup.bin");
+    cache.replaceEntry(7, 1, newEntry);
+    cache.clearReplacement(7, "backup.bin");
+    cache.invalidate(7);
+
+    await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([]);
+    expect(cache.replacementOverlaySize).toBe(0);
+  });
+
+  test("soft-holds overlay past 60s when LIST still omits description and warns once", async () => {
+    const expired: unknown[] = [];
+    const cache = new ListTtlCache((event) => expired.push(event));
+    const oldEntry = folderEntry(1, "backup.bin");
+    const newEntry = folderEntry(2, "backup.bin");
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      cache.replaceEntry(7, oldEntry.id, newEntry);
+      now += 60_000;
+
+      // Soft TTL: keep serving the overlay so cold checksum sync does not
+      // fall back to a synthetic fingerprint and re-upload the object.
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        newEntry,
+      ]);
+      expect(cache.replacementOverlaySize).toBe(1);
+      expect(expired).toEqual([
+        {
+          folderId: 7,
+          name: "backup.bin",
+          oldEntryId: 1,
+          newEntryId: 2,
+        },
+      ]);
+
+      // Later soft-hold refresh must not re-warn (health/list storms).
+      now += 60_000;
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        newEntry,
+      ]);
+      expect(cache.replacementOverlaySize).toBe(1);
+      expect(expired).toHaveLength(1);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("soft-holds an expired candidate while a later overlay remains active", async () => {
+    const expired: unknown[] = [];
+    const cache = new ListTtlCache((event) => expired.push(event));
+    const replacementA = folderEntry(2, "a.bin");
+    const replacementB = folderEntry(4, "b.bin");
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      await cache.getOrFetch(7, async () => []);
+      cache.replaceEntry(7, 1, replacementA);
+
+      now += 59_000;
+      cache.replaceEntry(7, 3, replacementB);
+      now += 1_000;
+
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        replacementA,
+        replacementB,
+      ]);
+      expect(expired).toHaveLength(1);
+      expect(expired[0]).toEqual({
+        folderId: 7,
+        name: "a.bin",
+        oldEntryId: 1,
+        newEntryId: 2,
+      });
+      expect(cache.replacementOverlaySize).toBe(2);
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        replacementA,
+        replacementB,
+      ]);
+      expect(expired).toHaveLength(1);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("keeps serving overlay over a suppressed raw row when soft TTL elapses", async () => {
+    const expired: unknown[] = [];
+    const cache = new ListTtlCache((event) => expired.push(event));
+    const oldA = folderEntry(1, "a.bin");
+    const candidateA = folderEntry(2, "a.bin");
+    const candidateB = folderEntry(4, "b.bin");
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      await cache.getOrFetch(7, async () => [oldA]);
+      cache.replaceEntry(7, oldA.id, candidateA);
+
+      now += 59_000;
+      await cache.getOrFetch(7, async () => [oldA]);
+      cache.replaceEntry(7, 3, candidateB);
+      now += 1_000;
+
+      // Soft hold: keep candidateA rather than restoring weak oldA.
+      await expect(cache.getOrFetch(7, async () => [])).resolves.toEqual([
+        candidateA,
+        candidateB,
+      ]);
+      expect(expired).toHaveLength(1);
+      expect(cache.replacementOverlaySize).toBe(2);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("bounds replacement overlay folder keys", () => {
+    const cache = new ListTtlCache();
+
+    for (let folderId = 0; folderId <= 5000; folderId += 1) {
+      cache.replaceEntry(
+        folderId,
+        folderId,
+        folderEntry(folderId + 10_000, `entry-${folderId}`),
+      );
+    }
+
+    expect(cache.replacementOverlaySize).toBe(5000);
+  });
+
+  test("warns once when the overlay bound evicts a live overlay", () => {
+    const evicted: unknown[] = [];
+    const cache = new ListTtlCache(
+      () => {},
+      (event) => evicted.push(event),
+    );
+
+    for (let folderId = 0; folderId <= 5000; folderId += 1) {
+      cache.replaceEntry(
+        folderId,
+        folderId,
+        folderEntry(folderId + 10_000, `entry-${folderId}`),
+      );
+    }
+
+    expect(evicted).toEqual([
+      {
+        folderId: 0,
+        name: "entry-0",
+        oldEntryId: 0,
+        newEntryId: 10_000,
+      },
+    ]);
+    expect(cache.replacementOverlaySize).toBe(5000);
+  });
+
+  test("bounds replacement overlays within one folder", async () => {
+    const cache = new ListTtlCache();
+
+    for (let id = 0; id <= 5000; id += 1) {
+      cache.replaceEntry(7, id, folderEntry(id + 10_000, `entry-${id}`));
+    }
+
+    expect(cache.replacementOverlaySize).toBe(5000);
+    const entries = await cache.getOrFetch(7, async () => [
+      folderEntry(0, "entry-0"),
+    ]);
+    expect(entries.some((entry) => entry.id === 0)).toBe(true);
+    expect(entries.some((entry) => entry.id === 10_000)).toBe(false);
+  });
+});

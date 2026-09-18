@@ -18,12 +18,94 @@ type Entry = {
   description?: string | null;
 };
 
+export type CreatedEntryShape =
+  | "fileEntry"
+  | "file"
+  | "entry"
+  | "data"
+  | "direct";
+
+export type MockPartPutReceipt = {
+  partNumber: number;
+  status: number;
+  bytes: number;
+};
+
+export type MockFileEntrySnapshot = {
+  id: number;
+  name: string;
+  file_size: number;
+};
+
 export type StartMockDrimeOptions = {
   /** Workspace id used for seeded folders (default `1`). */
   workspaceId?: number;
   /** Folder names created at workspace root (valid Drime `type: "folder"` rows). */
   seedRootFolders?: string[];
+  /** Remaining forced 500s for POST `/uploads`, `/s3/multipart/create`, and `/s3/entries`. */
+  uploadFailureCount?: number;
+  /** Remaining forced 500s for PUT `/file-entries/:id`. */
+  metadataFailureCount?: number;
+  /** Remaining forced 500s for POST `/file-entries/delete`. */
+  deleteFailureCount?: number;
+  /** Raw JSON body returned by forced 500s. */
+  faultBody?: string;
+  /** Wrapper used for created-file JSON. Default matches current `{ fileEntry }`. */
+  createdEntryShape?: CreatedEntryShape;
+  /**
+   * After a live delete, include snapshotted rows in this many subsequent
+   * folder-list responses (Drive eventual consistency).
+   */
+  staleListingsAfterDelete?: number;
+  /** Status codes consumed one-for-one by `PUT /mock-multipart-put`. */
+  partPutStatuses?: number[];
+  /** Remaining deletes that remove the ids then return the production 422 body. */
+  deleteInvalidIdsCount?: number;
+  /**
+   * Remaining folder lists that return 200 with an empty page. Used so
+   * coordinator confirmation stays unresolved without DrimeClient 5xx retries.
+   */
+  emptyListingCount?: number;
+  /** Remaining forced 500s for GET `/drive/file-entries`. */
+  listFailureCount?: number;
+  /** Remaining forced 500s for POST `/s3/multipart/batch-sign-part-urls`. */
+  signPartUrlFailureCount?: number;
+  /** Remaining forced 500s for GET `/file-entries/:id/download`. */
+  downloadFailureCount?: number;
 };
+
+function wrapCreatedEntry(
+  row: Record<string, unknown>,
+  shape: CreatedEntryShape,
+): unknown {
+  switch (shape) {
+    case "file":
+      return { file: row };
+    case "entry":
+      return { entry: row };
+    case "data":
+      return { data: row };
+    case "direct":
+      return row;
+    default:
+      return { fileEntry: row };
+  }
+}
+
+const DEFAULT_FAULT_BODY = JSON.stringify({ error: "forced failure" });
+
+/** Exact production body for `POST /file-entries/delete` when ids are already gone. */
+const INVALID_ENTRY_IDS_BODY = JSON.stringify({
+  message: "The selected entry ids is invalid.",
+  errors: { entryIds: ["The selected entry ids is invalid."] },
+});
+
+function forcedFailureResponse(body: string): Response {
+  return new Response(body, {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -132,6 +214,36 @@ function downloadResponse(
 export type MockDrimeServer = {
   baseUrl: string;
   stop(): void;
+  /** Remaining forced 500s for candidate upload/registration. Mutate between requests. */
+  uploadFailureCount: number;
+  /** Remaining forced 500s for metadata updates. Mutate between requests. */
+  metadataFailureCount: number;
+  /** Remaining forced 500s for deletes. Mutate between requests. */
+  deleteFailureCount: number;
+  /** Raw JSON body returned by the next forced 500s. */
+  faultBody: string;
+  /** Remaining folder lists that still include snapshotted deleted rows. */
+  staleListingsAfterDelete: number;
+  /** Remaining `/mock-multipart-put` statuses, consumed front-to-back. */
+  partPutStatuses: number[];
+  /** Remaining deletes that apply then return the production invalid-ids 422. */
+  deleteInvalidIdsCount: number;
+  /** Remaining folder lists that return an empty 200 page. */
+  emptyListingCount: number;
+  /** Remaining forced 500s for folder lists. */
+  listFailureCount: number;
+  /** Remaining forced 500s for batch-sign-part-urls. */
+  signPartUrlFailureCount: number;
+  /** Remaining forced 500s for object downloads. */
+  downloadFailureCount: number;
+  /** Every `PUT /mock-multipart-put`, including failed statuses. */
+  partPutReceipts: MockPartPutReceipt[];
+  /** `POST /s3/multipart/complete` invocations, including 4xx. */
+  multipartCompleteCount: number;
+  /** Live Drive file rows (not folders, not stale snapshots). */
+  snapshotFileEntries(): MockFileEntrySnapshot[];
+  /** Clone a live file row under the same parent and exact name. */
+  cloneFileById(id: number): number | undefined;
 };
 
 /**
@@ -165,6 +277,74 @@ export async function startMockDrime(
     });
   }
 
+  const createdEntryShape: CreatedEntryShape =
+    options.createdEntryShape ?? "fileEntry";
+  const staleDeleted: Entry[] = [];
+  const handle: MockDrimeServer = {
+    baseUrl: "",
+    stop() {},
+    uploadFailureCount: options.uploadFailureCount ?? 0,
+    metadataFailureCount: options.metadataFailureCount ?? 0,
+    deleteFailureCount: options.deleteFailureCount ?? 0,
+    faultBody: options.faultBody ?? DEFAULT_FAULT_BODY,
+    staleListingsAfterDelete: options.staleListingsAfterDelete ?? 0,
+    partPutStatuses: [...(options.partPutStatuses ?? [])],
+    deleteInvalidIdsCount: options.deleteInvalidIdsCount ?? 0,
+    emptyListingCount: options.emptyListingCount ?? 0,
+    listFailureCount: options.listFailureCount ?? 0,
+    signPartUrlFailureCount: options.signPartUrlFailureCount ?? 0,
+    downloadFailureCount: options.downloadFailureCount ?? 0,
+    partPutReceipts: [],
+    multipartCompleteCount: 0,
+    snapshotFileEntries() {
+      return entries
+        .filter((e) => e.type === "text")
+        .map((e) => ({ id: e.id, name: e.name, file_size: e.file_size }));
+    },
+    cloneFileById(id: number) {
+      const row = entries.find((e) => e.id === id && e.type === "text");
+      if (!row) return undefined;
+      const bytes = fileBytes.get(id);
+      if (!bytes) return undefined;
+      const cloneId = nextId++;
+      const clone: Entry = { ...row, id: cloneId };
+      entries.push(clone);
+      fileBytes.set(cloneId, new Uint8Array(bytes));
+      rollupFolderBytes(entries, clone.parent_id, clone.file_size);
+      return cloneId;
+    },
+  };
+
+  const applyDeletes = (ids: Set<number>): void => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const row = entries[i];
+      if (row !== undefined && ids.has(row.id)) {
+        staleDeleted.push({ ...row });
+        if (row.type === "text") {
+          rollupFolderBytes(entries, row.parent_id, -row.file_size);
+        }
+        fileBytes.delete(row.id);
+        entries.splice(i, 1);
+      }
+    }
+  };
+
+  const takeFault = (
+    key:
+      | "uploadFailureCount"
+      | "metadataFailureCount"
+      | "deleteFailureCount"
+      | "listFailureCount"
+      | "signPartUrlFailureCount"
+      | "downloadFailureCount",
+  ): boolean => {
+    if (handle[key] > 0) {
+      handle[key] -= 1;
+      return true;
+    }
+    return false;
+  };
+
   const server = Bun.serve({
     port: 0,
     fetch(req) {
@@ -181,10 +361,23 @@ export async function startMockDrime(
             return new Response("Not Found", { status: 404 });
           }
           const buf = new Uint8Array(await req.arrayBuffer());
+          const queued = handle.partPutStatuses.shift();
+          const status =
+            typeof queued === "number" && Number.isFinite(queued)
+              ? queued
+              : 200;
+          handle.partPutReceipts.push({
+            partNumber: partNum,
+            status,
+            bytes: buf.byteLength,
+          });
+          if (status < 200 || status >= 300) {
+            return new Response("part put failed", { status });
+          }
           state.parts.set(partNum, buf);
           const md5 = createHash("md5").update(buf).digest("hex");
           return new Response("", {
-            status: 200,
+            status,
             headers: { ETag: `"${md5}"` },
           });
         })();
@@ -201,6 +394,13 @@ export async function startMockDrime(
       }
 
       if (req.method === "GET" && path === "/drive/file-entries") {
+        if (takeFault("listFailureCount")) {
+          return forcedFailureResponse(handle.faultBody);
+        }
+        if (handle.emptyListingCount > 0) {
+          handle.emptyListingCount -= 1;
+          return json({ data: [], last_page: 1 });
+        }
         const ws = Number(url.searchParams.get("workspaceId") ?? "0");
         const parentIdsRaw = url.searchParams.get("parentIds");
         const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
@@ -209,12 +409,22 @@ export async function startMockDrime(
           Number(url.searchParams.get("perPage") ?? "100"),
         );
 
-        let rows = entries.filter((e) => e.workspaceId === ws);
-        if (parentIdsRaw === null || parentIdsRaw === "") {
-          rows = rows.filter((e) => e.parent_id === null);
-        } else {
-          const pid = Number(parentIdsRaw);
-          rows = rows.filter((e) => e.parent_id === pid);
+        const matchesParent = (e: Entry): boolean => {
+          if (e.workspaceId !== ws) return false;
+          if (parentIdsRaw === null || parentIdsRaw === "") {
+            return e.parent_id === null;
+          }
+          return e.parent_id === Number(parentIdsRaw);
+        };
+
+        let rows = entries.filter(matchesParent);
+        if (handle.staleListingsAfterDelete > 0 && staleDeleted.length > 0) {
+          const liveIds = new Set(rows.map((e) => e.id));
+          const extra = staleDeleted.filter(
+            (e) => matchesParent(e) && !liveIds.has(e.id),
+          );
+          rows = [...extra, ...rows];
+          handle.staleListingsAfterDelete -= 1;
         }
 
         const total = rows.length;
@@ -267,6 +477,9 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/uploads") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           const ct = req.headers.get("content-type") ?? "";
           let parentId: number | null = null;
           let ws = workspaceId;
@@ -307,12 +520,17 @@ export async function startMockDrime(
           entries.push(row);
           fileBytes.set(id, payload);
           rollupFolderBytes(entries, parentId, payload.length);
-          return json({ fileEntry: entryToJson(row, url.origin) });
+          return json(
+            wrapCreatedEntry(entryToJson(row, url.origin), createdEntryShape),
+          );
         })();
       }
 
       const downloadMatch = /^\/file-entries\/(\d+)\/download$/.exec(path);
       if (req.method === "GET" && downloadMatch) {
+        if (takeFault("downloadFailureCount")) {
+          return forcedFailureResponse(handle.faultBody);
+        }
         const id = Number(downloadMatch[1]);
         const bytes = fileBytes.get(id);
         if (bytes === undefined) {
@@ -322,8 +540,19 @@ export async function startMockDrime(
       }
 
       const entryPutMatch = /^\/file-entries\/(\d+)$/.exec(path);
+      if (req.method === "GET" && entryPutMatch) {
+        const id = Number(entryPutMatch[1]);
+        const row = entries.find((e) => e.id === id);
+        if (row === undefined) {
+          return new Response("Not Found", { status: 404 });
+        }
+        return json({ fileEntry: entryToJson(row, url.origin) });
+      }
       if (req.method === "PUT" && entryPutMatch) {
         return (async () => {
+          if (takeFault("metadataFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           const id = Number(entryPutMatch[1]);
           const row = entries.find((e) => e.id === id);
           if (row === undefined) {
@@ -341,22 +570,27 @@ export async function startMockDrime(
         return (async () => {
           const body = (await req.json()) as { entryIds?: number[] };
           const ids = new Set(body.entryIds ?? []);
-          for (let i = entries.length - 1; i >= 0; i--) {
-            const row = entries[i];
-            if (row !== undefined && ids.has(row.id)) {
-              if (row.type === "text") {
-                rollupFolderBytes(entries, row.parent_id, -row.file_size);
-              }
-              fileBytes.delete(row.id);
-              entries.splice(i, 1);
-            }
+          if (handle.deleteInvalidIdsCount > 0) {
+            handle.deleteInvalidIdsCount -= 1;
+            applyDeletes(ids);
+            return new Response(INVALID_ENTRY_IDS_BODY, {
+              status: 422,
+              headers: { "Content-Type": "application/json" },
+            });
           }
+          if (takeFault("deleteFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
+          applyDeletes(ids);
           return json({ status: "success" });
         })();
       }
 
       if (req.method === "POST" && path === "/s3/multipart/create") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           await req.arrayBuffer().catch(() => undefined);
           const uid = `mu-${nextId++}`;
           const dk = `dk-${uid}`;
@@ -370,6 +604,9 @@ export async function startMockDrime(
         path === "/s3/multipart/batch-sign-part-urls"
       ) {
         return (async () => {
+          if (takeFault("signPartUrlFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           const body = (await req.json()) as {
             uploadId?: string;
             partNumbers?: number[];
@@ -389,6 +626,7 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/s3/multipart/complete") {
         return (async () => {
+          handle.multipartCompleteCount += 1;
           const body = (await req.json()) as {
             key?: string;
             uploadId?: string;
@@ -440,6 +678,9 @@ export async function startMockDrime(
 
       if (req.method === "POST" && path === "/s3/entries") {
         return (async () => {
+          if (takeFault("uploadFailureCount")) {
+            return forcedFailureResponse(handle.faultBody);
+          }
           const body = (await req.json()) as {
             filename?: string;
             clientName?: string;
@@ -487,7 +728,9 @@ export async function startMockDrime(
           };
           entries.push(row);
           fileBytes.set(id, bytes);
-          return json({ fileEntry: entryToJson(row, url.origin) });
+          return json(
+            wrapCreatedEntry(entryToJson(row, url.origin), createdEntryShape),
+          );
         })();
       }
 
@@ -495,12 +738,9 @@ export async function startMockDrime(
     },
   });
 
-  const baseUrl = `http://127.0.0.1:${server.port}`;
-
-  return {
-    baseUrl,
-    stop() {
-      server.stop();
-    },
+  handle.baseUrl = `http://127.0.0.1:${server.port}`;
+  handle.stop = () => {
+    server.stop();
   };
+  return handle;
 }

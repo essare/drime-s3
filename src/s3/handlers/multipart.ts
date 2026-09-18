@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { XMLParser } from "fast-xml-parser";
 import { normalizePathKey } from "../../cache/folder-paths";
 import { DrimeApiError } from "../../drime/client";
+import { uploadPartWithRetry } from "../../drime/multipart-upload";
 import {
   type CompositeUploadPayload,
   decodeCompositeUploadId,
@@ -11,8 +12,12 @@ import {
 } from "../../multipart/session-store";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
+import { safeHandlerErrorFields } from "../handler-error-fields";
 import { isValidBucketName } from "../naming";
-import { buildObjectDescription } from "../tagging";
+import {
+  commitObjectReplacement,
+  ObjectReplacementError,
+} from "../object-replacement";
 import {
   completeMultipartUploadXml,
   initiateMultipartUploadXml,
@@ -20,17 +25,7 @@ import {
 } from "../xml";
 import { findRootFolder } from "./bucket";
 import { ensureParentFolderForPut } from "./object";
-import { resolveObjectKey } from "./object-resolve";
-
-/** Parse Drime `POST /s3/entries` (or similar) JSON for a file entry id. */
-function parseFileEntryId(raw: unknown): number | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const o = raw as Record<string, unknown>;
-  const fe = o.fileEntry ?? o.file ?? o.entry;
-  if (!fe || typeof fe !== "object") return undefined;
-  const id = (fe as Record<string, unknown>).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
-}
+import { ambiguousMutationError, resolveObjectKey } from "./object-resolve";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -223,14 +218,10 @@ export async function handleMultipartRequest(
       });
     } catch (e) {
       ctx.logger.error(
-        { err: e instanceof Error ? e.message : String(e) },
+        { ...safeHandlerErrorFields(e), bucket, key },
         "multipart init failed",
       );
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? e.message : "Multipart init failed.",
-      );
+      return xmlErr(500, "InternalError", "Multipart init failed.");
     }
   }
 
@@ -281,13 +272,42 @@ export async function handleMultipartRequest(
       );
     }
 
-    const signUrls = await ctx.drime.s3BatchSignPartUrls({
-      key: session.drimeKey,
-      uploadId: session.drimeUid,
-      partNumbers: [partNum],
-    });
-    const signed =
-      signUrls.find((u) => u.partNumber === partNum)?.url ?? signUrls[0]?.url;
+    let rawBytes: Uint8Array;
+    try {
+      rawBytes = new Uint8Array(await req.arrayBuffer());
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), partNumber: partNum },
+        "multipart upload part failed",
+      );
+      return xmlErr(500, "InternalError", "Part upload failed.");
+    }
+    if (rawBytes.byteLength !== clNum) {
+      return xmlErr(
+        400,
+        "InvalidRequest",
+        "Content-Length does not match the request body.",
+      );
+    }
+    const bodyBuf = Buffer.alloc(rawBytes.byteLength);
+    bodyBuf.set(rawBytes);
+
+    let signed: string | undefined;
+    try {
+      const signUrls = await ctx.drime.s3BatchSignPartUrls({
+        key: session.drimeKey,
+        uploadId: session.drimeUid,
+        partNumbers: [partNum],
+      });
+      signed =
+        signUrls.find((u) => u.partNumber === partNum)?.url ?? signUrls[0]?.url;
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), partNumber: partNum },
+        "multipart upload part failed",
+      );
+      return xmlErr(500, "InternalError", "Part upload failed.");
+    }
     if (!signed) {
       return xmlErr(
         500,
@@ -296,27 +316,14 @@ export async function handleMultipartRequest(
       );
     }
 
-    const rawBody = req.body;
-    if (!rawBody && clNum > 0) {
-      return xmlErr(400, "InvalidRequest", "Missing request body.");
-    }
-
     try {
-      const upstream = await ctx.drime.putUnsignedUrl(signed, {
-        body: rawBody ?? new Uint8Array(0),
-        headers: {
-          "Content-Type": "application/octet-stream",
-          "Content-Length": String(clNum),
-        },
-      });
-      if (!upstream.ok) {
-        const t = await upstream.text();
-        return xmlErr(
-          500,
-          "InternalError",
-          `Part upload failed (${upstream.status}): ${t.slice(0, 200)}`,
-        );
-      }
+      const upstream = await uploadPartWithRetry(
+        ctx,
+        signed,
+        bodyBuf,
+        clNum,
+        partNum,
+      );
       const etagHdr = upstream.headers.get("etag");
       const etag = etagHdr
         ? etagHdr.replace(/^"+|"+$/g, "")
@@ -341,14 +348,10 @@ export async function handleMultipartRequest(
       });
     } catch (e) {
       ctx.logger.error(
-        { err: e instanceof Error ? e.message : String(e) },
+        { ...safeHandlerErrorFields(e), partNumber: partNum },
         "multipart upload part failed",
       );
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? e.message : "Part upload failed.",
-      );
+      return xmlErr(500, "InternalError", "Part upload failed.");
     }
   }
 
@@ -401,24 +404,6 @@ export async function handleMultipartRequest(
       }),
     };
 
-    try {
-      await ctx.drime.s3MultipartComplete(completePayload);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      ctx.logger.error({ err: msg }, "multipart complete failed");
-      if (e instanceof DrimeApiError) {
-        const safe = msg.replace(/</g, " ").slice(0, 2000);
-        if (e.status >= 400 && e.status < 500) {
-          return xmlErr(400, "InvalidRequest", safe);
-        }
-      }
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? msg.slice(0, 2000) : "Multipart complete failed.",
-      );
-    }
-
     const trimmed = session.key.replace(/^\/+|\/+$/g, "");
     const filename = trimmed.includes("/")
       ? trimmed.slice(trimmed.lastIndexOf("/") + 1)
@@ -444,31 +429,74 @@ export async function handleMultipartRequest(
         ? compositeMultipartEtag(etagsOrdered)
         : '"complete"';
 
-    // Replace any existing object at this key (same as PUT) so retries /
-    // rclone re-syncs do not leave duplicate Drive entries with the same name.
+    let existing: Awaited<ReturnType<typeof resolveObjectKey>>;
     try {
-      const existing = await resolveObjectKey(
+      existing = await resolveObjectKey(
         ctx,
         W,
         bucketRootId,
         bucket,
         session.key,
       );
-      if (existing.kind === "file" || existing.kind === "folder") {
-        await ctx.drime.deleteEntriesForever([existing.entry.id]);
-        ctx.listCache.invalidate(existing.parentFolderId);
-      }
     } catch (e) {
       ctx.logger.error(
-        { err: e instanceof Error ? e.message : String(e) },
-        "multipart complete: delete existing object failed",
+        { ...safeHandlerErrorFields(e), bucket, key: session.key },
+        "multipart complete resolve failed",
       );
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? e.message : "Delete existing object failed.",
-      );
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
     }
+    if (existing.kind === "ambiguous") {
+      await ctx.drime
+        .s3MultipartAbort({
+          key: session.drimeKey,
+          uploadId: session.drimeUid,
+        })
+        .catch(() => {});
+      ctx.multipartStore.delete(uploadIdParam);
+      return ambiguousMutationError(ctx, bucket, session.key, existing);
+    }
+
+    try {
+      await ctx.drime.s3MultipartComplete(completePayload);
+    } catch (e) {
+      ctx.logger.error(
+        { ...safeHandlerErrorFields(e), bucket, key: session.key },
+        "multipart complete failed",
+      );
+      if (e instanceof DrimeApiError && e.status >= 400 && e.status < 500) {
+        return xmlErr(400, "InvalidRequest", "Multipart complete failed.");
+      }
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
+    }
+
+    const failAfterUpstreamComplete = (
+      error: unknown,
+      logMessage: string,
+    ): Response => {
+      ctx.multipartStore.delete(uploadIdParam);
+      if (error instanceof ObjectReplacementError) {
+        ctx.logger.error(
+          {
+            bucket,
+            key: session.key,
+            parentId: session.parentId,
+            stage: error.stage,
+          },
+          logMessage,
+        );
+      } else {
+        ctx.logger.error(
+          {
+            ...safeHandlerErrorFields(error),
+            bucket,
+            key: session.key,
+            parentId: session.parentId,
+          },
+          logMessage,
+        );
+      }
+      return xmlErr(500, "InternalError", "Multipart complete failed.");
+    };
 
     const entryPayload: Record<string, unknown> = {
       clientMime: "application/octet-stream",
@@ -487,30 +515,31 @@ export async function handleMultipartRequest(
     try {
       entryRaw = await ctx.drime.s3CreateEntry(entryPayload);
     } catch (e) {
-      ctx.logger.error(
-        { err: e instanceof Error ? e.message : String(e) },
-        "s3/entries after multipart failed",
-      );
-      return xmlErr(
-        500,
-        "InternalError",
-        e instanceof Error ? e.message : "Create entry failed.",
-      );
+      return failAfterUpstreamComplete(e, "s3/entries after multipart failed");
     }
 
-    // Persist composite multipart ETag so subsequent HEAD/GET/list match
-    // CompleteMultipartUploadResult. rclone HEADs after complete and fails
-    // with "multipart upload corrupted: Etag differ" without this.
-    const fileEntryId = parseFileEntryId(entryRaw);
-    if (fileEntryId !== undefined) {
-      try {
-        await ctx.drime.updateFileEntryDescription(
-          fileEntryId,
-          buildObjectDescription(etagOut.replace(/^"|"$/g, ""), null),
-        );
-      } catch {
-        /* optional Drime feature */
-      }
+    try {
+      await commitObjectReplacement(ctx, {
+        rawCandidate: entryRaw,
+        oldEntry:
+          existing.kind === "file" || existing.kind === "folder"
+            ? existing.entry
+            : undefined,
+        parentId: session.parentId,
+        workspaceId: W,
+        bucket,
+        key: session.key,
+        name: filename,
+        size: finalSize,
+        mime: "application/octet-stream",
+        publicEtag: etagOut,
+        tagging: null,
+      });
+    } catch (e) {
+      return failAfterUpstreamComplete(
+        e,
+        "multipart complete replacement failed",
+      );
     }
 
     ctx.multipartStore.delete(uploadIdParam);

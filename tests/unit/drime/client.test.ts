@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DrimeApiError,
   DrimeClient,
   type DrimeFetchFn,
   GatewayWorkspaceError,
+  isInvalidEntryIdsError,
 } from "../../../src/drime/client";
 
 describe("DrimeClient", () => {
@@ -111,5 +113,70 @@ describe("DrimeClient", () => {
     await expect(
       client.resolveGatewayWorkspaceId({ name: "drime-s3" }),
     ).rejects.toThrow(GatewayWorkspaceError);
+  });
+  test("getFileEntry unwraps fileEntry and parses description", async () => {
+    const fetchFn: DrimeFetchFn = async (input) => {
+      expect(String(input)).toContain("/file-entries/42");
+      return new Response(
+        JSON.stringify({
+          fileEntry: {
+            id: 42,
+            name: "backup.bin",
+            type: "text",
+            parent_id: 7,
+            file_size: 4,
+            description: "md5:cccccccccccccccccccccccccccccccc-41",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const client = new DrimeClient({
+      apiKey: "k",
+      apiBaseUrl: "https://x/api/v1",
+      fetchFn,
+    });
+    const entry = await client.getFileEntry(42);
+    expect(entry.id).toBe(42);
+    expect(entry.description).toBe("md5:cccccccccccccccccccccccccccccccc-41");
+  });
+});
+
+describe("isInvalidEntryIdsError", () => {
+  test("classifies the production 422 invalid-entry-ids body", () => {
+    const error = new DrimeApiError(
+      422,
+      JSON.stringify({
+        message: "The selected entry ids is invalid.",
+        errors: { entryIds: ["The selected entry ids is invalid."] },
+      }),
+    );
+    expect(isInvalidEntryIdsError(error)).toBe(true);
+  });
+
+  test("rejects other 422 validation bodies", () => {
+    expect(
+      isInvalidEntryIdsError(
+        new DrimeApiError(
+          422,
+          JSON.stringify({ message: "The name field is required." }),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects the same body on another status", () => {
+    expect(
+      isInvalidEntryIdsError(
+        new DrimeApiError(500, "selected entry ids is invalid"),
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects non-Drime errors", () => {
+    expect(
+      isInvalidEntryIdsError(new Error("selected entry ids is invalid")),
+    ).toBe(false);
+    expect(isInvalidEntryIdsError(undefined)).toBe(false);
   });
 });

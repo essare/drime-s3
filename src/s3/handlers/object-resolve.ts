@@ -1,12 +1,64 @@
 import { normalizePathKey } from "../../cache/folder-paths";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
+import { s3ErrorXml } from "../errors";
+import { hydrateObjectEntry } from "../etag-hydrate";
 
 export type KeyResolve =
   | { kind: "file"; entry: FileEntry; parentFolderId: number }
   | { kind: "folder"; entry: FileEntry; parentFolderId: number }
+  | {
+      kind: "ambiguous";
+      entries: FileEntry[];
+      parentFolderId: number;
+      leafName: string;
+    }
   | { kind: "missing_prefix"; leafName: string }
   | { kind: "missing_file"; parentFolderId: number; leafName: string };
+
+export function readableObjectEntry(
+  resolved: KeyResolve,
+): { entry: FileEntry; parentFolderId: number } | undefined {
+  if (resolved.kind === "file" || resolved.kind === "folder") {
+    return { entry: resolved.entry, parentFolderId: resolved.parentFolderId };
+  }
+  if (resolved.kind === "ambiguous") {
+    const entry = resolved.entries[0];
+    if (!entry) return undefined;
+    return { entry, parentFolderId: resolved.parentFolderId };
+  }
+  return undefined;
+}
+
+export function logAmbiguousObjectKey(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+  resolved: Extract<KeyResolve, { kind: "ambiguous" }>,
+): void {
+  ctx.logger.error(
+    {
+      bucket,
+      key,
+      parentFolderId: resolved.parentFolderId,
+      entryIds: resolved.entries.map((entry) => entry.id),
+    },
+    "ambiguous_object_key",
+  );
+}
+
+export function ambiguousMutationError(
+  ctx: AppContext,
+  bucket: string,
+  key: string,
+  resolved: Extract<KeyResolve, { kind: "ambiguous" }>,
+): Response {
+  logAmbiguousObjectKey(ctx, bucket, key, resolved);
+  return new Response(s3ErrorXml("InternalError", "Object key is ambiguous."), {
+    status: 500,
+    headers: { "Content-Type": "application/xml" },
+  });
+}
 
 export async function resolveObjectKey(
   ctx: AppContext,
@@ -57,13 +109,22 @@ export async function resolveObjectKey(
   const entries = await ctx.listCache.getOrFetch(parentFolderId, () =>
     ctx.drime.listFolder(parentFolderId, W),
   );
-  for (const e of entries) {
-    if (e.name === leafName) {
-      if (e.is_folder) {
-        return { kind: "folder", entry: e, parentFolderId };
-      }
-      return { kind: "file", entry: e, parentFolderId };
-    }
+  const matches = entries.filter((e) => e.name === leafName);
+  if (matches.length > 1) {
+    return {
+      kind: "ambiguous",
+      entries: matches,
+      parentFolderId,
+      leafName,
+    };
   }
-  return { kind: "missing_file", parentFolderId, leafName };
+  const found = matches[0];
+  if (!found) {
+    return { kind: "missing_file", parentFolderId, leafName };
+  }
+  if (found.is_folder) {
+    return { kind: "folder", entry: found, parentFolderId };
+  }
+  const entry = await hydrateObjectEntry(ctx, parentFolderId, found);
+  return { kind: "file", entry, parentFolderId };
 }
