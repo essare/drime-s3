@@ -257,6 +257,25 @@ export class DrimeClient {
     });
   }
 
+  /**
+   * Fetch one entry by id. Used when Drive LIST omits `description` after a
+   * gateway restart so cold S3 LIST/HEAD can still expose the committed ETag.
+   */
+  async getFileEntry(entryId: number): Promise<FileEntry> {
+    const res = await this.request("GET", `/file-entries/${entryId}`);
+    const payload = (await res.json()) as unknown;
+    if (payload !== null && typeof payload === "object") {
+      const o = payload as Record<string, unknown>;
+      if (o.fileEntry !== undefined) return fromFileEntryJson(o.fileEntry);
+      if (o.file !== undefined) return fromFileEntryJson(o.file);
+      if (o.entry !== undefined) return fromFileEntryJson(o.entry);
+      if (o.data !== undefined && !Array.isArray(o.data)) {
+        return fromFileEntryJson(o.data);
+      }
+    }
+    return fromFileEntryJson(payload);
+  }
+
   /** Authenticated `fetch` to an absolute URL (e.g. file download). */
   async fetchAuthenticated(
     absoluteUrl: string,

@@ -2,6 +2,7 @@ import { normalizePathKey } from "../../cache/folder-paths";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
+import { hydrateObjectEntry } from "../etag-hydrate";
 
 export type KeyResolve =
   | { kind: "file"; entry: FileEntry; parentFolderId: number }
@@ -124,5 +125,6 @@ export async function resolveObjectKey(
   if (found.is_folder) {
     return { kind: "folder", entry: found, parentFolderId };
   }
-  return { kind: "file", entry: found, parentFolderId };
+  const entry = await hydrateObjectEntry(ctx, parentFolderId, found);
+  return { kind: "file", entry, parentFolderId };
 }

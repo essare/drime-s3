@@ -540,6 +540,14 @@ export async function startMockDrime(
       }
 
       const entryPutMatch = /^\/file-entries\/(\d+)$/.exec(path);
+      if (req.method === "GET" && entryPutMatch) {
+        const id = Number(entryPutMatch[1]);
+        const row = entries.find((e) => e.id === id);
+        if (row === undefined) {
+          return new Response("Not Found", { status: 404 });
+        }
+        return json({ fileEntry: entryToJson(row, url.origin) });
+      }
       if (req.method === "PUT" && entryPutMatch) {
         return (async () => {
           if (takeFault("metadataFailureCount")) {

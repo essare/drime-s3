@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { drimeTimestampToIso } from "../../drime/datetime";
 import type { FileEntry } from "../../drime/types";
 import type { AppContext } from "../../server-context";
+import { hydrateListingEtags } from "../etag-hydrate";
 import { etagFromFileEntry } from "../tagging";
 import { type ListBucketEntry, listBucketResultXml } from "../xml";
 
@@ -136,9 +137,10 @@ async function listRecursive(
   folderId: number,
   basePrefix: string,
 ): Promise<ListBucketEntry[]> {
-  const entries = await ctx.listCache.getOrFetch(folderId, () =>
+  const raw = await ctx.listCache.getOrFetch(folderId, () =>
     ctx.drime.listFolder(folderId, W),
   );
+  const entries = await hydrateListingEtags(ctx, folderId, raw);
   const out: ListBucketEntry[] = [];
   for (const entry of entries) {
     const fullKey = basePrefix + entry.name;
@@ -157,9 +159,10 @@ async function listWithDelimiter(
   folderId: number,
   basePrefix: string,
 ): Promise<{ contents: ListBucketEntry[]; folders: AdminFolder[] }> {
-  const entries = await ctx.listCache.getOrFetch(folderId, () =>
+  const raw = await ctx.listCache.getOrFetch(folderId, () =>
     ctx.drime.listFolder(folderId, W),
   );
+  const entries = await hydrateListingEtags(ctx, folderId, raw);
   const contents: ListBucketEntry[] = [];
   const folders: AdminFolder[] = [];
   for (const entry of entries) {

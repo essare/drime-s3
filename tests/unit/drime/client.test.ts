@@ -114,6 +114,32 @@ describe("DrimeClient", () => {
       client.resolveGatewayWorkspaceId({ name: "drime-s3" }),
     ).rejects.toThrow(GatewayWorkspaceError);
   });
+  test("getFileEntry unwraps fileEntry and parses description", async () => {
+    const fetchFn: DrimeFetchFn = async (input) => {
+      expect(String(input)).toContain("/file-entries/42");
+      return new Response(
+        JSON.stringify({
+          fileEntry: {
+            id: 42,
+            name: "backup.bin",
+            type: "text",
+            parent_id: 7,
+            file_size: 4,
+            description: "md5:cccccccccccccccccccccccccccccccc-41",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const client = new DrimeClient({
+      apiKey: "k",
+      apiBaseUrl: "https://x/api/v1",
+      fetchFn,
+    });
+    const entry = await client.getFileEntry(42);
+    expect(entry.id).toBe(42);
+    expect(entry.description).toBe("md5:cccccccccccccccccccccccccccccccc-41");
+  });
 });
 
 describe("isInvalidEntryIdsError", () => {
