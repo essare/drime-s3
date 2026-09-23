@@ -32,6 +32,8 @@ export class DrimeApiError extends Error {
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_ATTEMPTS = 5;
 const PER_PAGE = 100;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_TRANSFER_TIMEOUT_MS = 300_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,6 +53,37 @@ function isNoRetryUpload(method: string, path: string): boolean {
   return false;
 }
 
+/**
+ * `fetch` that gives up if response headers do not arrive within `timeoutMs`.
+ * The timer stops once headers are received, so long streaming bodies (large
+ * downloads) are not cut off. Rejects with a `TimeoutError` DOMException.
+ */
+async function fetchWithHeaderTimeout(
+  fetchFn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(
+      new DOMException(
+        `Request timed out after ${timeoutMs}ms`,
+        "TimeoutError",
+      ),
+    );
+  }, timeoutMs);
+  const callerSignal = init?.signal;
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, controller.signal])
+    : controller.signal;
+  try {
+    return await fetchFn(input, { ...init, signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Compatible with `typeof fetch` / `globalThis.fetch` for injection in tests. */
 export type DrimeFetchFn = (
   input: RequestInfo | URL,
@@ -61,16 +94,25 @@ export class DrimeClient {
   private readonly apiKey: string;
   private readonly apiBaseUrl: string;
   private readonly fetchFn: DrimeFetchFn;
+  private readonly requestTimeoutMs: number;
+  private readonly transferTimeoutMs: number;
 
   constructor(opts: {
     apiKey: string;
     apiBaseUrl: string;
     /** Defaults to `globalThis.fetch`; accepts `typeof fetch`. */
     fetchFn?: DrimeFetchFn;
+    /** Time to receive response headers for JSON API calls (default 30s). */
+    requestTimeoutMs?: number;
+    /** Time to receive response headers for uploads/downloads (default 5min). */
+    transferTimeoutMs?: number;
   }) {
     this.apiKey = opts.apiKey;
     this.apiBaseUrl = opts.apiBaseUrl.replace(/\/+$/, "");
     this.fetchFn = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.transferTimeoutMs =
+      opts.transferTimeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS;
   }
 
   /**
@@ -93,15 +135,18 @@ export class DrimeClient {
     }
 
     const { method: _ignored, ...restInit } = init ?? {};
+    const timeoutMs =
+      path === "/uploads" ? this.transferTimeoutMs : this.requestTimeoutMs;
     let lastNetworkError: unknown;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        const res = await this.fetchFn(url, {
-          ...restInit,
-          method,
-          headers,
-        });
+        const res = await fetchWithHeaderTimeout(
+          this.fetchFn,
+          url,
+          { ...restInit, method, headers },
+          timeoutMs,
+        );
 
         if (res.ok) {
           return res;
@@ -248,7 +293,12 @@ export class DrimeClient {
   ): Promise<Response> {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${this.apiKey}`);
-    return this.fetchFn(absoluteUrl, { ...init, headers });
+    return fetchWithHeaderTimeout(
+      this.fetchFn,
+      absoluteUrl,
+      { ...init, headers },
+      this.transferTimeoutMs,
+    );
   }
 
   async deleteEntriesForever(ids: number[]): Promise<unknown> {
@@ -351,11 +401,12 @@ export class DrimeClient {
     absoluteUrl: string,
     init: { body: BodyInit | null; headers?: HeadersInit },
   ): Promise<Response> {
-    return this.fetchFn(absoluteUrl, {
-      method: "PUT",
-      body: init.body,
-      headers: init.headers,
-    });
+    return fetchWithHeaderTimeout(
+      this.fetchFn,
+      absoluteUrl,
+      { method: "PUT", body: init.body, headers: init.headers },
+      this.transferTimeoutMs,
+    );
   }
 
   /** `GET /me/workspaces` — bearer token same as other Drime calls. */
