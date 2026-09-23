@@ -12,7 +12,7 @@ import {
   getMultipartPutThresholdBytes,
   uploadFileViaInternalMultipart,
 } from "../../drime/multipart-upload";
-import type { FileEntry } from "../../drime/types";
+import { type FileEntry, fromFileEntryJson } from "../../drime/types";
 import type { AppContext } from "../../server-context";
 import { s3ErrorXml } from "../errors";
 import { isValidBucketName } from "../naming";
@@ -112,13 +112,36 @@ export async function ensureParentFolderForPut(
   return { ok: true, parentId: currentPid };
 }
 
-function parseUploadFileEntryId(raw: unknown): number | undefined {
+function parseUploadFileEntry(raw: unknown): FileEntry | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;
   const fe = o.fileEntry ?? o.file;
   if (!fe || typeof fe !== "object") return undefined;
   const id = (fe as Record<string, unknown>).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : undefined;
+  if (typeof id !== "number" || !Number.isFinite(id)) return undefined;
+  return fromFileEntryJson(fe);
+}
+
+/**
+ * Keep a cached folder listing in step with a just-finished upload instead of
+ * dropping it: splicing the entry in (with the description we just wrote, which
+ * carries the ETag) avoids re-listing every page of a large folder after each
+ * write. Falls back to invalidation when the entry is unknown.
+ */
+function cacheUploadedEntry(
+  ctx: AppContext,
+  parentId: number,
+  entry: FileEntry | undefined,
+  description: string | null,
+): void {
+  if (!entry) {
+    ctx.listCache.invalidate(parentId);
+    return;
+  }
+  ctx.listCache.addEntry(parentId, {
+    ...entry,
+    description: description ?? entry.description,
+  });
 }
 
 async function writeRequestBodyToTemp(
@@ -258,7 +281,10 @@ async function handlePutCopyObject(
 
     if (destResolved.kind === "file" || destResolved.kind === "folder") {
       await ctx.drime.deleteEntriesForever([destResolved.entry.id]);
-      ctx.listCache.invalidate(destResolved.parentFolderId);
+      ctx.listCache.removeEntryById(
+        destResolved.parentFolderId,
+        destResolved.entry.id,
+      );
     }
 
     const uploadRaw = await ctx.drime.uploadFile({
@@ -267,18 +293,21 @@ async function handlePutCopyObject(
       parentId,
       workspaceId: W,
     });
-    const uploadedId = parseUploadFileEntryId(uploadRaw);
-    if (uploadedId !== undefined) {
+    const uploadedEntry = parseUploadFileEntry(uploadRaw);
+    let writtenDescription: string | null = null;
+    if (uploadedEntry) {
+      const desc = buildObjectDescription(
+        md5Hex,
+        req.headers.get("x-amz-tagging"),
+      );
       try {
-        await ctx.drime.updateFileEntryDescription(
-          uploadedId,
-          buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
-        );
+        await ctx.drime.updateFileEntryDescription(uploadedEntry.id, desc);
+        writtenDescription = desc;
       } catch {
         /* optional Drime feature */
       }
     }
-    ctx.listCache.invalidate(parentId);
+    cacheUploadedEntry(ctx, parentId, uploadedEntry, writtenDescription);
 
     const xml = copyObjectResultXml({
       etag: `"${md5Hex}"`,
@@ -544,7 +573,7 @@ export async function handleObjectRequest(
     }
     try {
       await ctx.drime.deleteEntriesForever([resolved.entry.id]);
-      ctx.listCache.invalidate(resolved.parentFolderId);
+      ctx.listCache.removeEntryById(resolved.parentFolderId, resolved.entry.id);
       ctx.folderCache.evictPrefix(normalizePathKey(`${bucket}/${key}`));
       return new Response(null, { status: 204 });
     } catch {
@@ -593,7 +622,10 @@ export async function handleObjectRequest(
 
       if (resolved.kind === "file" || resolved.kind === "folder") {
         await ctx.drime.deleteEntriesForever([resolved.entry.id]);
-        ctx.listCache.invalidate(resolved.parentFolderId);
+        ctx.listCache.removeEntryById(
+          resolved.parentFolderId,
+          resolved.entry.id,
+        );
       }
 
       // Drime's `/uploads` endpoint sits behind a Cloudflare 100 MiB
@@ -640,18 +672,21 @@ export async function handleObjectRequest(
         parentId,
         workspaceId: W,
       });
-      const uploadedId = parseUploadFileEntryId(raw);
-      if (uploadedId !== undefined) {
+      const uploadedEntry = parseUploadFileEntry(raw);
+      let writtenDescription: string | null = null;
+      if (uploadedEntry) {
+        const desc = buildObjectDescription(
+          md5Hex,
+          req.headers.get("x-amz-tagging"),
+        );
         try {
-          await ctx.drime.updateFileEntryDescription(
-            uploadedId,
-            buildObjectDescription(md5Hex, req.headers.get("x-amz-tagging")),
-          );
+          await ctx.drime.updateFileEntryDescription(uploadedEntry.id, desc);
+          writtenDescription = desc;
         } catch {
           /* optional Drime feature */
         }
       }
-      ctx.listCache.invalidate(parentId);
+      cacheUploadedEntry(ctx, parentId, uploadedEntry, writtenDescription);
 
       return new Response("", {
         status: 200,
