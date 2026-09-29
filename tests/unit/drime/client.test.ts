@@ -112,4 +112,86 @@ describe("DrimeClient", () => {
       client.resolveGatewayWorkspaceId({ name: "drime-s3" }),
     ).rejects.toThrow(GatewayWorkspaceError);
   });
+
+  describe("request timeouts", () => {
+    /** fetch that never answers, but honours the abort signal like real fetch. */
+    const hangingFetch: DrimeFetchFn = (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        );
+      });
+
+    test("non-retryable call rejects with TimeoutError instead of hanging", async () => {
+      let calls = 0;
+      const client = new DrimeClient({
+        apiKey: "k",
+        apiBaseUrl: "https://app.drime.cloud/api/v1",
+        requestTimeoutMs: 25,
+        fetchFn: (input, init) => {
+          calls += 1;
+          return hangingFetch(input, init);
+        },
+      });
+      const err = await client.s3MultipartComplete({}).catch((e) => e);
+      expect(err).toBeInstanceOf(DOMException);
+      expect((err as DOMException).name).toBe("TimeoutError");
+      expect(calls).toBe(1);
+    });
+
+    test("retryable call retries after a timed-out attempt", async () => {
+      let calls = 0;
+      const client = new DrimeClient({
+        apiKey: "k",
+        apiBaseUrl: "https://app.drime.cloud/api/v1",
+        requestTimeoutMs: 25,
+        fetchFn: (input, init) => {
+          calls += 1;
+          if (calls === 1) return hangingFetch(input, init);
+          return Promise.resolve(
+            new Response(JSON.stringify({ data: [], last_page: 1 }), {
+              status: 200,
+            }),
+          );
+        },
+      });
+      await expect(client.listFolder(null)).resolves.toEqual([]);
+      expect(calls).toBe(2);
+    });
+
+    test("caller abort signal still cancels the request", async () => {
+      const client = new DrimeClient({
+        apiKey: "k",
+        apiBaseUrl: "https://app.drime.cloud/api/v1",
+        fetchFn: hangingFetch,
+      });
+      const ac = new AbortController();
+      const pending = client
+        .request("POST", "/s3/multipart/complete", { signal: ac.signal })
+        .catch((e) => e);
+      ac.abort(new Error("caller gave up"));
+      expect(((await pending) as Error).message).toBe("caller gave up");
+    });
+
+    test("header timeout does not cut off a slow streaming body", async () => {
+      const client = new DrimeClient({
+        apiKey: "k",
+        apiBaseUrl: "https://app.drime.cloud/api/v1",
+        transferTimeoutMs: 40,
+        fetchFn: async () => {
+          const body = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              controller.enqueue(new TextEncoder().encode("part1-"));
+              await new Promise((r) => setTimeout(r, 120));
+              controller.enqueue(new TextEncoder().encode("part2"));
+              controller.close();
+            },
+          });
+          return new Response(body, { status: 200 });
+        },
+      });
+      const res = await client.fetchAuthenticated("https://example.test/dl");
+      expect(await res.text()).toBe("part1-part2");
+    });
+  });
 });

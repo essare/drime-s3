@@ -456,7 +456,10 @@ export async function handleMultipartRequest(
       );
       if (existing.kind === "file" || existing.kind === "folder") {
         await ctx.drime.deleteEntriesForever([existing.entry.id]);
-        ctx.listCache.invalidate(existing.parentFolderId);
+        ctx.listCache.removeEntryById(
+          existing.parentFolderId,
+          existing.entry.id,
+        );
       }
     } catch (e) {
       ctx.logger.error(
